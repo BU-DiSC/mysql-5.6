@@ -1432,6 +1432,7 @@ enum {
   INDEX_TYPE,
   KV_FORMAT_VERSION,
   TTL_DURATION,
+  DPT,
   INDEX_FLAGS,
   CF,
   AUTO_INCREMENT
@@ -1450,6 +1451,7 @@ static ST_FIELD_INFO rdb_i_s_ddl_fields_info[] = {
     ROCKSDB_FIELD_INFO("KV_FORMAT_VERSION", sizeof(uint16_t), MYSQL_TYPE_SHORT,
                        0),
     ROCKSDB_FIELD_INFO("TTL_DURATION", sizeof(uint64), MYSQL_TYPE_LONGLONG, 0),
+    ROCKSDB_FIELD_INFO("DPT", sizeof(uint64), MYSQL_TYPE_LONGLONG, 0),
     ROCKSDB_FIELD_INFO("INDEX_FLAGS", sizeof(uint64), MYSQL_TYPE_LONGLONG, 0),
     ROCKSDB_FIELD_INFO("CF", NAME_LEN + 1, MYSQL_TYPE_STRING, 0),
     ROCKSDB_FIELD_INFO("AUTO_INCREMENT", sizeof(uint64_t), MYSQL_TYPE_LONGLONG,
@@ -1496,6 +1498,7 @@ int Rdb_ddl_scanner::add_table(Rdb_tbl_def *tdef) {
     field[RDB_DDL_FIELD::KV_FORMAT_VERSION]->store(kd.m_kv_format_version,
                                                    true);
     field[RDB_DDL_FIELD::TTL_DURATION]->store(kd.m_ttl_duration, true);
+    field[RDB_DDL_FIELD::DPT]->store(kd.m_dpt, true);
     field[RDB_DDL_FIELD::INDEX_FLAGS]->store(kd.m_index_flags_bitmap, true);
 
     std::string cf_name = kd.get_cf()->GetName();
