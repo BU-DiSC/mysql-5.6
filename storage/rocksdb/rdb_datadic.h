@@ -1825,6 +1825,7 @@ struct Rdb_index_info {
   uint16_t m_kv_version = 0;
   uint32 m_index_flags = 0;
   uint64 m_ttl_duration = 0;
+  uint64 m_dpt = 0;
 };
 
 /*

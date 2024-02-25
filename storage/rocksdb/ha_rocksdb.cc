@@ -10473,7 +10473,7 @@ int ha_rocksdb::create(const char *const name, TABLE *const table_arg,
   } else {
     table_type = TABLE_TYPE::USER_TABLE;
   }
-  DBUG_PRINT("info", ("create_info->dpt: %lu", create_info->dpt));
+
   DBUG_RETURN(create_table(str, create_info->actual_user_table_name, *table_arg,
                            create_info->auto_increment_value, table_def,
                            table_type));
