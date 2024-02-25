@@ -2740,6 +2740,8 @@ void HA_CREATE_INFO::init_create_options_from_share(const TABLE_SHARE *share,
   if (!(used_fields & HA_CREATE_USED_AVG_ROW_LENGTH))
     avg_row_length = share->avg_row_length;
 
+  if (!(used_fields & HA_CREATE_USED_DPT)) dpt = share->dpt;
+
   if (!(used_fields & HA_CREATE_USED_DEFAULT_CHARSET))
     default_table_charset = share->table_charset;
 

@@ -788,6 +788,7 @@ struct TABLE_SHARE {
   /// The set of visible and enabled indexes for this table.
   Key_map visible_indexes;
   Key_map keys_for_keyread;
+  uint64_t dpt{0};                  /* create information */
   ha_rows min_rows{0}, max_rows{0}; /* create information */
   ulong avg_row_length{0};          /* create information */
   ulong mysql_version{0};           /* 0 if .frm is created before 5.0 */

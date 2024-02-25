@@ -9852,7 +9852,8 @@ uint ha_rocksdb::create_inplace_key_defs(
           okd.m_is_per_partition_cf, okd.m_name.c_str(),
           dict_manager.get_dict_manager_selector_const(gl_index_id.cf_id)
               ->get_stats(gl_index_id),
-          index_info.m_index_flags, ttl_rec_offset, ttl_duration);
+          index_info.m_index_flags, ttl_rec_offset, ttl_duration,
+          table_arg.s->dpt);
     } else if (create_key_def(table_arg, i, tbl_def_arg, new_key_descr[i],
                               cfs[i], ttl_duration, ttl_column)) {
       return HA_EXIT_FAILURE;
@@ -10057,7 +10058,8 @@ int ha_rocksdb::create_key_def(
   new_key_def = std::make_shared<Rdb_key_def>(
       index_id, i, cf_info.cf_handle, index_dict_version, index_type,
       kv_version, cf_info.is_reverse_cf, cf_info.is_per_partition_cf, key_name,
-      Rdb_index_stats(), index_flags, ttl_rec_offset, ttl_duration);
+      Rdb_index_stats(), index_flags, ttl_rec_offset, ttl_duration,
+      table_arg.s->dpt);
 
   if (!ttl_column.empty()) {
     new_key_def->m_ttl_column = ttl_column;
@@ -10463,6 +10465,7 @@ int ha_rocksdb::create(const char *const name, TABLE *const table_arg,
   } else {
     table_type = TABLE_TYPE::USER_TABLE;
   }
+
   DBUG_RETURN(create_table(str, create_info->actual_user_table_name, *table_arg,
                            create_info->auto_increment_value, table_def,
                            table_type));
@@ -12329,9 +12332,9 @@ int ha_rocksdb::acquire_prefix_lock(const Rdb_key_def &kd, Rdb_transaction *tx,
     HA_EXIT_SUCCESS  OK
     other            HA_ERR error code (can be SE-specific)
 */
-int ha_rocksdb::check_and_lock_sk(
-    const uint key_id, const struct update_row_info &row_info,
-    bool *const found) {
+int ha_rocksdb::check_and_lock_sk(const uint key_id,
+                                  const struct update_row_info &row_info,
+                                  bool *const found) {
   assert(
       (row_info.old_data == table->record[1] &&
        row_info.new_data == table->record[0]) ||
