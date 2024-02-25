@@ -4459,6 +4459,15 @@ String *Item_func_get_dd_create_options::val_str(String *str) {
     }
   }
 
+    if (p->exists("dpt")) {
+    uint opt_value = 0;
+    p->get("dpt", &opt_value);
+    if (opt_value != 0) {
+      longlong10_to_str(opt_value, tmp_buff, 10);
+      oss << " dpt=" << tmp_buff;
+    }
+  }
+
   if (p->exists("row_type")) {
     uint opt_value = 0;
     p->get("row_type", &opt_value);
