@@ -1393,6 +1393,8 @@ void warn_about_deprecated_binary(THD *thd)
 %token<lexer.keyword> GENERATE_SYM               1203   /* MYSQL */
 %token<lexer.keyword> BULK_LOAD_SYM               1204   /* MYSQL */
 
+%token<lexer.keyword> DPT_SYM                    1205   /* BU-DISC-R */
+
 /*
   Precedence rules used to resolve the ambiguity when using keywords as idents
   in the case e.g.:
@@ -6827,6 +6829,11 @@ opt_comma:
         ;
 
 create_table_option:
+          DPT_SYM opt_equal ulonglong_num
+          {
+            $$= NEW_PTN PT_create_dpt_option($3);
+          }
+        |
           ENGINE_SYM opt_equal ident_or_text
           {
             $$= NEW_PTN PT_create_table_engine_option(to_lex_cstring($3));
