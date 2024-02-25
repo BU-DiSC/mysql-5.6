@@ -4221,6 +4221,7 @@ bool Rdb_tbl_def::put_dict(Rdb_dict_manager *const dict,
     index_info.m_kv_version = kd.m_kv_format_version;
     index_info.m_index_flags = kd.m_index_flags_bitmap;
     index_info.m_ttl_duration = kd.m_ttl_duration;
+    index_info.m_dpt = kd.m_dpt;
 
     dict->add_or_update_index_cf_mapping(batch, &index_info);
   }
@@ -4697,7 +4698,7 @@ bool Rdb_ddl_manager::populate(uint32_t validate_tables) {
           flags & Rdb_key_def::REVERSE_CF_FLAG,
           flags & Rdb_key_def::PER_PARTITION_CF_FLAG, "",
           dict_user_table->get_stats(gl_index_id), index_info.m_index_flags,
-          ttl_rec_offset, index_info.m_ttl_duration);
+          ttl_rec_offset, index_info.m_ttl_duration, index_info.m_dpt);
       if (index_info.m_index_type == Rdb_key_def::INDEX_TYPE_PRIMARY) {
         tdef->m_pk_index = keyno;
       }
@@ -5501,6 +5502,7 @@ void Rdb_dict_manager::add_or_update_index_cf_mapping(
   value_writer.write_uint16(index_info->m_kv_version);
   value_writer.write_uint32(index_info->m_index_flags);
   value_writer.write_uint64(index_info->m_ttl_duration);
+  value_writer.write_uint64(index_info->m_dpt);
 
   batch->Put(m_system_cfh, key_writer.to_slice(), value_writer.to_slice());
 }
@@ -5570,10 +5572,10 @@ bool Rdb_dict_manager::get_index_info(
     switch (index_info->m_index_dict_version) {
       case Rdb_key_def::INDEX_INFO_VERSION_FIELD_FLAGS:
         /* Sanity check to prevent reading bogus TTL record. */
-        if (value.size() != RDB_SIZEOF_INDEX_INFO_VERSION +
-                                RDB_SIZEOF_INDEX_TYPE + RDB_SIZEOF_KV_VERSION +
-                                RDB_SIZEOF_INDEX_FLAGS +
-                                ROCKSDB_SIZEOF_TTL_RECORD) {
+        if (value.size() !=
+            RDB_SIZEOF_INDEX_INFO_VERSION + RDB_SIZEOF_INDEX_TYPE +
+                RDB_SIZEOF_KV_VERSION + RDB_SIZEOF_INDEX_FLAGS +
+                ROCKSDB_SIZEOF_TTL_RECORD + ROCKSDB_SIZEOF_DPT) {
           error = true;
           break;
         }
@@ -5584,6 +5586,8 @@ bool Rdb_dict_manager::get_index_info(
         index_info->m_index_flags = rdb_netbuf_to_uint32(ptr);
         ptr += RDB_SIZEOF_INDEX_FLAGS;
         index_info->m_ttl_duration = rdb_netbuf_to_uint64(ptr);
+        ptr += ROCKSDB_SIZEOF_TTL_RECORD;
+        index_info->m_dpt = rdb_netbuf_to_uint64(ptr);
         found = true;
         break;
 
