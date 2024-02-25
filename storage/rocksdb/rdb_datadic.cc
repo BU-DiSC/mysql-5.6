@@ -271,7 +271,8 @@ Rdb_key_def::Rdb_key_def(
     uint16_t index_dict_version_arg, uchar index_type_arg,
     uint16_t kv_format_version_arg, bool is_reverse_cf_arg,
     bool is_per_partition_cf_arg, const char *_name, Rdb_index_stats _stats,
-    uint32 index_flags_bitmap, uint32 ttl_rec_offset, uint64 ttl_duration)
+    uint32 index_flags_bitmap, uint32 ttl_rec_offset, uint64 ttl_duration,
+    uint64 dpt)
     : m_index_number(indexnr_arg),
       m_cf_handle(cf_handle_arg),
       m_index_dict_version(index_dict_version_arg),
@@ -285,6 +286,7 @@ Rdb_key_def::Rdb_key_def(
       m_ttl_rec_offset(ttl_rec_offset),
       m_ttl_duration(ttl_duration),
       m_ttl_column(""),
+      m_dpt(dpt),
       m_pk_part_no(nullptr),
       m_pack_info(nullptr),
       m_keyno(keyno_arg),
@@ -316,6 +318,7 @@ Rdb_key_def::Rdb_key_def(const Rdb_key_def &k)
       m_ttl_rec_offset(k.m_ttl_rec_offset),
       m_ttl_duration(k.m_ttl_duration),
       m_ttl_column(k.m_ttl_column),
+      m_dpt(k.m_dpt),
       m_pk_part_no(k.m_pk_part_no),
       m_pack_info(k.m_pack_info),
       m_keyno(k.m_keyno),
