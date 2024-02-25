@@ -824,6 +824,8 @@ constexpr const uint64_t HA_CREATE_USED_AUTOEXTEND_SIZE{1ULL << 35};
 
 constexpr const uint64_t HA_CREATE_USED_PRIVACY_POLICY{1ULL << 36};
 
+constexpr const uint64_t HA_CREATE_USED_DPT{1ULL << 37};
+
 /*
   End of bits used in used_fields
 */
@@ -3186,6 +3188,7 @@ struct HA_CREATE_INFO {
   ulonglong auto_increment_value{0};
   ulong table_options{0};
   ulong avg_row_length{0};
+  uint64_t dpt{0};
   uint64_t used_fields{0};
   // Can only be 1,2,4,8 or 16, but use uint32_t since that how it is
   // represented in InnoDB
