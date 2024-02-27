@@ -2410,15 +2410,6 @@ typedef PT_traceable_create_table_option<
     PT_create_avg_row_length_option;
 
 /**
-  Node for the @SQL{DPT [=] @B{@<integer@>}} table option
-
-  @ingroup ptn_create_or_alter_table_options
-*/
-typedef PT_traceable_create_table_option<TYPE_AND_REF(HA_CREATE_INFO::dpt),
-                                         HA_CREATE_USED_DPT>
-    PT_create_dpt_option;
-
-/**
   Node for the @SQL{PASSWORD [=] @B{@<string@>}} table option
 
   @ingroup ptn_create_or_alter_table_options

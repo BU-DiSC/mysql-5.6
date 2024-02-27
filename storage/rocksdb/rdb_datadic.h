@@ -419,8 +419,7 @@ class Rdb_key_def {
               uint16_t kv_format_version_arg, bool is_reverse_cf_arg,
               bool is_per_partition_cf, const char *name,
               Rdb_index_stats stats = Rdb_index_stats(), uint32 index_flags = 0,
-              uint32 ttl_rec_offset = UINT_MAX, uint64 ttl_duration = 0,
-              uint64 dpt = 0);
+              uint32 ttl_rec_offset = UINT_MAX, uint64 ttl_duration = 0);
   ~Rdb_key_def();
 
   enum {
@@ -589,8 +588,6 @@ class Rdb_key_def {
                                             uint &ttl_field_index,
                                             bool skip_checks = false);
   inline bool has_ttl() const { return m_ttl_duration > 0; }
-
-  inline bool has_dpt() const { return m_dpt > 0; }
 
   [[nodiscard]] uint extract_partial_index_info(const TABLE &table_arg,
                                                 const Rdb_tbl_def &tbl_def_arg);
@@ -922,9 +919,6 @@ class Rdb_key_def {
 
   /* TTL column (if defined by user, otherwise implicit TTL is used) */
   std::string m_ttl_column;
-
-  /* Data Persistence Threshold (DPT) */
-  uint64 m_dpt;
 
   /* Maximum total length of mem-comparable blob keys */
   uint m_max_blob_length;
@@ -1825,7 +1819,6 @@ struct Rdb_index_info {
   uint16_t m_kv_version = 0;
   uint32 m_index_flags = 0;
   uint64 m_ttl_duration = 0;
-  uint64 m_dpt = 0;
 };
 
 /*

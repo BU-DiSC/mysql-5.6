@@ -74,11 +74,6 @@ TEST_F(ISNativeFuncTest, AllNullArguments) {
   item->val_int();
   EXPECT_EQ(1, item->null_value);
 
-  // INTERNAL_DPT(NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL)
-  CREATE_ITEM(Item_func_internal_dpt, prepare_null_list(8));
-  item->val_int();
-  EXPECT_EQ(1, item->null_value);
-
   // INTERNAL_DATA_LENGTH(NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL)
   CREATE_ITEM(Item_func_internal_data_length, prepare_null_list(8));
   item->val_int();

@@ -301,8 +301,6 @@ enum select_bypass_policy_type {
 */
 #define ROCKSDB_SIZEOF_TTL_RECORD sizeof(longlong)
 
-#define ROCKSDB_SIZEOF_DPT sizeof(longlong)
-
 #define ROCKSDB_SIZEOF_AUTOINC_VALUE sizeof(longlong)
 
 /*
