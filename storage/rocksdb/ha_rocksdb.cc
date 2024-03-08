@@ -9583,6 +9583,11 @@ int ha_rocksdb::create_key_defs(
     DBUG_RETURN(HA_EXIT_FAILURE);
   }
 
+   if (table_arg.s->dpt > 0 && has_hidden_pk(table_arg)) {
+    my_error(ER_RDB_DPT_UNSUPPORTED, MYF(0));
+    DBUG_RETURN(HA_EXIT_FAILURE);
+  }
+
   /*
     If TTL duration is not specified but TTL column was specified, throw an
     error because TTL column requires duration.
