@@ -1,0 +1,18 @@
+--source include/have_debug.inc
+--source include/have_rocksdb.inc
+
+CREATE TABLE t1 (
+  a int PRIMARY KEY
+) ENGINE=rocksdb DPT=10;
+
+insert into t1 values (1), (2), (3);
+
+delete from t1 WHERE a=1 WITH dpt=10;
+
+select * from t1;
+
+delete from t1 with dpt=5;
+
+select * from t1;
+
+drop table t1;

@@ -859,6 +859,9 @@ Sql_cmd *PT_delete::make_cmd(THD *thd) {
   select->init_order();
   if (opt_delete_options & DELETE_QUICK) select->add_base_options(OPTION_QUICK);
 
+  if (opt_dpt_clause > 0)
+    select->m_dpt = opt_dpt_clause;
+
   if (contextualize_safe(&pc, m_with_clause))
     return nullptr; /* purecov: inspected */
 
