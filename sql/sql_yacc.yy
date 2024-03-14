@@ -2227,6 +2227,8 @@ void warn_about_deprecated_binary(THD *thd)
 
 %type <num> read_only_opt boolean_val
 %type <num> opt_compressed_clause
+
+%type <num> opt_dpt_clause
 %%
 
 /*
@@ -13704,8 +13706,9 @@ delete_stmt:
           opt_where_clause
           opt_order_clause
           opt_simple_limit
+          opt_dpt_clause
           {
-            $$= NEW_PTN PT_delete($1, $2, $3, $5, $6, $7, $8, $9, $10);
+            $$= NEW_PTN PT_delete($1, $2, $3, $5, $6, $7, $8, $9, $10, $11);
           }
         | opt_with_clause
           DELETE_SYM
@@ -13714,8 +13717,9 @@ delete_stmt:
           FROM
           table_reference_list
           opt_where_clause
+          opt_dpt_clause
           {
-            $$= NEW_PTN PT_delete($1, $2, $3, $4, $6, $7);
+            $$= NEW_PTN PT_delete($1, $2, $3, $4, $6, $7, $8);
           }
         | opt_with_clause
           DELETE_SYM
@@ -13725,10 +13729,15 @@ delete_stmt:
           USING
           table_reference_list
           opt_where_clause
+          opt_dpt_clause
           {
-            $$= NEW_PTN PT_delete($1, $2, $3, $5, $7, $8);
+            $$= NEW_PTN PT_delete($1, $2, $3, $5, $7, $8, $9);
           }
         ;
+
+opt_dpt_clause:
+          /* empty */                          { $$= 0; }
+        | WITH DPT_SYM opt_equal ulonglong_num { $$= $4; } 
 
 opt_wild:
           /* empty */

@@ -9583,7 +9583,8 @@ int ha_rocksdb::create_key_defs(
     DBUG_RETURN(HA_EXIT_FAILURE);
   }
 
-   if (table_arg.s->dpt > 0 && has_hidden_pk(table_arg)) {
+  if ((table_arg.s->create_dpt > 0 || table_arg.s->dml_dpt > 0) &&
+      has_hidden_pk(table_arg)) {
     my_error(ER_RDB_DPT_UNSUPPORTED, MYF(0));
     DBUG_RETURN(HA_EXIT_FAILURE);
   }
@@ -9866,7 +9867,7 @@ uint ha_rocksdb::create_inplace_key_defs(
           dict_manager.get_dict_manager_selector_const(gl_index_id.cf_id)
               ->get_stats(gl_index_id),
           index_info.m_index_flags, ttl_rec_offset, ttl_duration,
-          table_arg.s->dpt);
+          table_arg.s->create_dpt);
     } else if (create_key_def(table_arg, i, tbl_def_arg, new_key_descr[i],
                               cfs[i], ttl_duration, ttl_column)) {
       return HA_EXIT_FAILURE;
@@ -10072,7 +10073,7 @@ int ha_rocksdb::create_key_def(
       index_id, i, cf_info.cf_handle, index_dict_version, index_type,
       kv_version, cf_info.is_reverse_cf, cf_info.is_per_partition_cf, key_name,
       Rdb_index_stats(), index_flags, ttl_rec_offset, ttl_duration,
-      table_arg.s->dpt);
+      table_arg.s->create_dpt);
 
   if (!ttl_column.empty()) {
     new_key_def->m_ttl_column = ttl_column;
@@ -13445,6 +13446,11 @@ int ha_rocksdb::delete_row(const uchar *const buf) {
   Rdb_transaction *const tx =
       get_or_create_tx(table->in_use, m_tbl_def->get_table_type());
   ulonglong bytes_written = 0;
+
+  uint64_t dpt = table_share->dml_dpt      ? table_share->dml_dpt
+                 : table_share->create_dpt ? table_share->create_dpt
+                                           : 0;
+  DBUG_PRINT("info", ("Deleting row with DPT: %ld", dpt));
 
   const uint index = pk_index(*table, *m_tbl_def);
   rocksdb::Status s = delete_or_singledelete(

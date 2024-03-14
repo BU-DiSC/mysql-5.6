@@ -2528,10 +2528,10 @@ bool store_create_info(THD *thd, Table_ref *table_list, String *packet,
       }
     }
 
-    if (share->dpt) {
+    if (share->create_dpt) {
       char *end;
       packet->append(STRING_WITH_LEN(" DPT="));
-      end = longlong10_to_str(share->dpt, buff, 10);
+      end = longlong10_to_str(share->create_dpt, buff, 10);
       packet->append(buff, (uint)(end - buff));
     }
 

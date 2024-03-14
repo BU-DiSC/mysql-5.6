@@ -2097,6 +2097,9 @@ class Query_block : public Query_term {
   /// Number of table functions in this query block
   uint table_func_count{0};
 
+  // Data Persistence Threshold specified in DML statement
+  uint64_t m_dpt{0};
+
   /**
     Nesting level of query block, outer-most query block has level 0,
     its subqueries have level 1, etc. @see also sql/item_sum.h.

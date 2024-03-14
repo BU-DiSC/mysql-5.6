@@ -231,6 +231,8 @@ bool Sql_cmd_delete::delete_from_single_table(THD *thd) {
   Table_ref *const delete_table_ref = table_list->updatable_base_table();
   TABLE *const table = delete_table_ref->table;
 
+  table->s->dml_dpt = query_block->m_dpt;
+
   const bool transactional_table = table->file->has_transactions();
 
   const bool has_delete_triggers =
@@ -635,6 +637,9 @@ bool Sql_cmd_delete::delete_from_single_table(THD *thd) {
 
 cleanup:
   assert(!lex->is_explain());
+
+  // Reset DML DPT
+  table->s->dml_dpt = 0;
 
   if (!transactional_table && deleted_rows > 0)
     thd->get_transaction()->mark_modified_non_trans_table(
