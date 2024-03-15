@@ -16,10 +16,10 @@
 #pragma once
 #ifdef WITH_FB_VECTORDB
 #include <faiss/Index.h>
-#endif
-#include <rocksdb/slice.h>
-#include <rocksdb/write_batch.h>
 #include <memory>
+#include <shared_mutex>
+#include <unordered_map>
+#endif
 #include "rdb_utils.h"
 #include "sql/item_fb_vector_func.h"
 
@@ -28,60 +28,34 @@ namespace myrocks {
 /** for infomation schema */
 class Rdb_vector_index_info {
  public:
-  /**
-    total number of vectors, this is populated when
-    scanning the index, not garanteed to be accurate.
-   */
   int64_t m_ntotal{0};
-  /**
-   number of time the index is used for knn search
-  */
-  uint m_hit{0};
-};
-
-class Rdb_vector_search_params {
- public:
-  FB_VECTOR_INDEX_METRIC m_metric = FB_VECTOR_INDEX_METRIC::NONE;
-  uint m_k = 0;
-  uint m_batch_size = 0;
 };
 
 /**
-  vector index base class
+  faiss index wrapper. not production ready,
+  a minimum implementation for testing purpose.
 */
 class Rdb_vector_index {
  public:
-  Rdb_vector_index() = default;
-  virtual ~Rdb_vector_index() = default;
-  /**
-    add a vector and its associated pk to the index.
-  */
-  virtual uint add_vector(rocksdb::WriteBatchBase *write_batch,
-                          const rocksdb::Slice &pk, std::vector<float> &value,
-                          const rocksdb::Slice &old_pk,
-                          std::vector<float> &old_value) = 0;
+  Rdb_vector_index(const FB_vector_index_config index_def);
 
   /**
     add a vector and its associated pk to the index.
   */
-  virtual uint delete_vector(rocksdb::WriteBatchBase *write_batch,
-                             const rocksdb::Slice &pk,
-                             std::vector<float> &old_value) = 0;
+  uint add_vector(const std::string &pk, const std::vector<float> &value);
 
-  virtual uint knn_search(
-      THD *thd, std::vector<float> &query_vector,
-      Rdb_vector_search_params &params,
-      std::vector<std::pair<std::string, float>> &result) = 0;
+  uint knn_search(const std::vector<float> &value, const uint k,
+                  std::vector<std::pair<std::string, float>> &result);
 
-  virtual Rdb_vector_index_info dump_info() = 0;
+  Rdb_vector_index_info dump_info();
 
-  virtual FB_vector_dimension dimension() const = 0;
+ private:
+#ifdef WITH_FB_VECTORDB
+  mutable std::shared_mutex m_index_mutex;
+  std::unique_ptr<faiss::Index> m_index;
+  std::unordered_map<faiss::idx_t, std::string> m_vector_id_pk_map;
+#endif
 };
-
-uint create_vector_index(const FB_vector_index_config index_def,
-                         std::shared_ptr<rocksdb::ColumnFamilyHandle> cf_handle,
-                         const Index_id index_id,
-                         std::unique_ptr<Rdb_vector_index> &index);
 
 /**
   one instance per handler, hold the vector buffers and knn results for the
@@ -90,17 +64,11 @@ uint create_vector_index(const FB_vector_index_config index_def,
 class Rdb_vector_db_handler {
  public:
   Rdb_vector_db_handler();
-  uint decode_value(Field *field, FB_vector_dimension dimension) {
-    return decode_value_to_buffer(field, dimension, m_buffer);
-  }
-  uint decode_value2(Field *field, FB_vector_dimension dimension) {
-    return decode_value_to_buffer(field, dimension, m_buffer2);
-  }
+  uint decode_value(Field *field, FB_vector_dimension dimension);
   /**
    get the buffer to store the vector value.
   */
   std::vector<float> &get_buffer() { return m_buffer; }
-  std::vector<float> &get_buffer2() { return m_buffer2; }
 
   bool has_more_results() {
     return !m_search_result.empty() &&
@@ -113,27 +81,29 @@ class Rdb_vector_db_handler {
     }
   }
 
-  std::string current_pk(const Index_id pk_index_id) const;
+  const std::string &current_pk() { return m_vector_db_result_iter->first; }
 
-  uint knn_search(THD *thd, Rdb_vector_index *index);
-  int vector_index_orderby_init(Item *sort_func, int limit, uint batch_size) {
+  uint knn_search(Rdb_vector_index *index) {
+    m_search_result.clear();
+    m_vector_db_result_iter = m_search_result.cend();
+
+    if (!m_input_vector.size() || !m_limit) return HA_ERR_END_OF_FILE;
+
+    uint rtn = index->knn_search(m_input_vector, m_limit, m_search_result);
+    if (rtn) {
+      return rtn;
+    }
+    m_vector_db_result_iter = m_search_result.cbegin();
+
+    return rtn;
+  }
+
+  int vector_index_orderby_init(Item *sort_func, int limit) {
     m_limit = limit;
-    m_batch_size = batch_size;
 
     Fb_vector input_vector;
     Item_func *item_func = (Item_func *)sort_func;
     Item **args = ((Item_func *)item_func)->arguments();
-
-    auto functype = item_func->functype();
-    if (functype == Item_func::FB_VECTOR_L2) {
-      m_metric = FB_VECTOR_INDEX_METRIC::L2;
-    } else if (functype == Item_func::FB_VECTOR_IP) {
-      m_metric = FB_VECTOR_INDEX_METRIC::IP;
-    } else {
-      // should never happen
-      assert(false);
-      return HA_ERR_UNSUPPORTED;
-    }
 
     // input vector is expected as the second argument
     uint arg_idx = 1;
@@ -146,32 +116,24 @@ class Rdb_vector_db_handler {
                                   input_vector))
       return HA_EXIT_FAILURE;
 
-    m_buffer = std::move(input_vector.data);
+    m_input_vector = std::move(input_vector.data);
     return HA_EXIT_SUCCESS;
   }
 
   void vector_index_orderby_end() {
-    m_metric = FB_VECTOR_INDEX_METRIC::NONE;
     // reset ORDER BY related
     m_limit = 0;
-    m_buffer.clear();
+    m_input_vector.clear();
   }
 
  private:
-  // input vector from the USER query,
-  // new vector for index write
   std::vector<float> m_buffer;
-  // old vector for index write
-  std::vector<float> m_buffer2;
   std::vector<std::pair<std::string, float>> m_search_result;
   decltype(m_search_result.cbegin()) m_vector_db_result_iter;
-  FB_VECTOR_INDEX_METRIC m_metric = FB_VECTOR_INDEX_METRIC::NONE;
+  // input vector from the USER query
+  std::vector<float> m_input_vector;
   // LIMIT associated with the ORDER BY clause
-  uint m_limit;
-  uint m_batch_size;
-
-  uint decode_value_to_buffer(Field *field, FB_vector_dimension dimension,
-                              std::vector<float> &buffer);
+  int m_limit;
 };
 
 }  // namespace myrocks
