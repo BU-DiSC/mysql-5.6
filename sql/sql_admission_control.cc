@@ -974,17 +974,6 @@ ulong AC::get_total_waiting_queries() const {
 }
 
 /**
-  Struct to hold AC queue stats. "full" is added to differentiate from
-  Ac_error_record::Ac_queue_stats which only holds a subset of stats.
-*/
-struct Ac_queue_full_stats {
-  ulong running;
-  ulong waiting;
-  ulong timeout;
-  ulong aborted;
-};
-
-/**
  * @brief Populate admission_control_queue table.
  * @param thd THD
  * @param tables contains the TABLE struct to populate
@@ -994,37 +983,22 @@ struct Ac_queue_full_stats {
 int fill_ac_queue(THD *thd, Table_ref *tables, Item *) {
   DBUG_ENTER("fill_ac_queue");
   TABLE *table = tables->table;
-  int result = 0;
-  std::array<Ac_queue_full_stats, MAX_AC_QUEUES> queue_stats;
 
   mysql_rwlock_rdlock(&db_ac->LOCK_ac);
   for (const auto &pair : db_ac->ac_map) {
     const std::string &db = pair.first;
     const auto &ac_info = pair.second;
-
-    // Copy the queue stats and release lock. Holding AC info lock across
-    // schema_table_store_record could deadlock due to possible yield which
-    // could try to acquire AC info lock.
     mysql_mutex_lock(&ac_info->lock);
     for (ulong i = 0; i < MAX_AC_QUEUES; i++) {
       const auto &q = ac_info->queues[i];
-      auto &qs = queue_stats[i];
 
-      qs.waiting = q.waiting_queries();
-      qs.running = q.running_queries;
-      qs.timeout = q.timeout_queries;
-      qs.aborted = q.aborted_queries;
-    }
-    mysql_mutex_unlock(&ac_info->lock);
-
-    for (ulong i = 0; i < MAX_AC_QUEUES; i++) {
-      const auto &qs = queue_stats[i];
-
+      auto waiting = q.waiting_queries();
+      auto running = q.running_queries;
+      auto timeout = q.timeout_queries;
+      auto aborted = q.aborted_queries;
       // Skip queues with no waiting/running queries.
-      if (qs.waiting == 0 && qs.running == 0 && qs.timeout == 0 &&
-          qs.aborted == 0) {
+      if (waiting == 0 && running == 0 && timeout == 0 && aborted == 0)
         continue;
-      }
 
       int f = 0;
 
@@ -1035,27 +1009,29 @@ int fill_ac_queue(THD *thd, Table_ref *tables, Item *) {
       table->field[f++]->store((ulonglong)i, true);
 
       // WAITING_QUERIES
-      table->field[f++]->store((ulonglong)qs.waiting, true);
+      table->field[f++]->store((ulonglong)waiting, true);
 
       // RUNNING_QUERIES
-      table->field[f++]->store((ulonglong)qs.running, true);
+      table->field[f++]->store((ulonglong)running, true);
 
       // ABORTED_QUERIES
-      table->field[f++]->store((ulonglong)qs.aborted, true);
+      table->field[f++]->store((ulonglong)aborted, true);
 
       // TIMEOUT_QUERIES
-      table->field[f++]->store((ulonglong)qs.timeout, true);
+      table->field[f++]->store((ulonglong)timeout, true);
 
       if (schema_table_store_record(thd, table)) {
-        result = 1;
-        break;
+        mysql_mutex_unlock(&ac_info->lock);
+        mysql_rwlock_unlock(&db_ac->LOCK_ac);
+
+        DBUG_RETURN(1);
       }
     }
+    mysql_mutex_unlock(&ac_info->lock);
   }
-
   mysql_rwlock_unlock(&db_ac->LOCK_ac);
 
-  DBUG_RETURN(result);
+  DBUG_RETURN(0);
 }
 
 /**
