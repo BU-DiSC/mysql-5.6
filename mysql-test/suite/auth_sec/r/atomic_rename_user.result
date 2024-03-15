@@ -1,5 +1,4 @@
 include/save_binlog_position.inc
-SET global skip_sys_tables_engine_check=true;
 # -----------------------------------------------------------------------
 # Begin : Tests for RENAME USER
 CREATE USER userX, userY, userZ;
@@ -177,4 +176,3 @@ CONNECTED_USER	a@%
 DROP USER a;
 # End : Tests for RENAME USER
 # -----------------------------------------------------------------------
-SET GLOBAL skip_sys_tables_engine_check=default;
