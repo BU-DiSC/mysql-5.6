@@ -1522,6 +1522,14 @@ class select_exec {
       return rdb_tx_get(m_tx, cf, key_slice, value_slice, m_table_type);
     }
 
+    void multi_get(rocksdb::ColumnFamilyHandle *cf, size_t size,
+                   bool sorted_input, const rocksdb::Slice *key_slices,
+                   rocksdb::PinnableSlice *value_slices,
+                   rocksdb::Status *statuses) {
+      rdb_tx_multi_get(m_tx, cf, size, key_slices, value_slices, m_table_type,
+                       statuses, sorted_input);
+    }
+
     void report_error(rocksdb::Status s) {
       if (s.IsIOError() || s.IsCorruption()) {
         rdb_handle_io_error(s, RDB_IO_ERROR_GENERAL);
@@ -1570,7 +1578,7 @@ class select_exec {
   bool unpack_for_pk(const rocksdb::Slice &rkey, const rocksdb::Slice &rvalue);
   bool eval_cond();
   int eval_and_send();
-  bool run_pk_point_query();
+  bool run_pk_point_query(txn_wrapper *txn);
   bool run_sk_point_query(txn_wrapper *txn);
   bool pack_index_tuple(uint key_part_no, Rdb_string_writer *writer,
                         const Field *field, const nosql_cond_value &value);
@@ -2327,7 +2335,7 @@ bool INLINE_ATTR select_exec::run_query() {
   }
 
   if (is_pk_point_query) {
-    ret = run_pk_point_query();
+    ret = run_pk_point_query(&txn);
   } else {
     m_pk_tuple_buf.resize(m_pk_def->max_storage_fmt_length());
 
@@ -2348,12 +2356,15 @@ bool INLINE_ATTR select_exec::run_query() {
   return ret;
 }
 
-bool INLINE_ATTR select_exec::run_pk_point_query() {
+bool INLINE_ATTR select_exec::run_pk_point_query(txn_wrapper *txn) {
+  auto cf = m_key_def->get_cf();
+
   if (m_key_index_tuples.size() > get_select_bypass_multiget_min()) {
     size_t size = m_key_index_tuples.size();
     std::vector<rocksdb::Slice> key_slices;
     key_slices.reserve(size);
     std::vector<rocksdb::PinnableSlice> value_slices(size);
+    std::vector<rocksdb::Status> statuses(size);
 
     for (auto &writer : m_key_index_tuples) {
       key_slices.push_back(writer.get_key_slice());
@@ -2364,18 +2375,19 @@ bool INLINE_ATTR select_exec::run_pk_point_query() {
 
     bool sorted_input =
         (m_key_def->m_is_reverse_cf == m_parser.is_order_desc());
-    std::vector<int> rtn_codes(size);
-    m_iterator->multi_get(key_slices, value_slices, rtn_codes, sorted_input);
+
+    txn->multi_get(m_key_def->get_cf(), size, sorted_input, key_slices.data(),
+                   value_slices.data(), statuses.data());
 
     for (size_t i = 0; i < size; ++i) {
       if (unlikely(handle_killed())) {
         return true;
       }
-      int rc = rtn_codes[i];
-      if (rc == HA_ERR_KEY_NOT_FOUND) {
+
+      if (statuses[i].IsNotFound()) {
         continue;
-      } else if (rc) {
-        m_handler->print_error(rc, 0);
+      } else if (!statuses[i].ok()) {
+        txn->report_error(statuses[i]);
         return true;
       }
 
@@ -2401,13 +2413,11 @@ bool INLINE_ATTR select_exec::run_pk_point_query() {
       value_slice.Reset();
 
       rocksdb::Slice key_slice = writer.get_key_slice();
-      auto rc = m_iterator->get(&key_slice, &value_slice, RDB_LOCK_NONE);
-      if (rc == HA_ERR_KEY_NOT_FOUND) {
+      rocksdb::Status s = txn->get(cf, key_slice, &value_slice);
+      if (s.IsNotFound()) {
         continue;
-      }
-
-      if (rc) {
-        m_handler->print_error(rc, 0);
+      } else if (!s.ok()) {
+        txn->report_error(s);
         return true;
       }
 
