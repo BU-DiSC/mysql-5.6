@@ -57,8 +57,6 @@ class Sql_cmd_dump_table final : public Sql_cmd {
     m_chunk_size = n;
   }
 
-  void set_consistent(bool consistent) { m_consistent = consistent; }
-
  private:
   struct Dump_work_item {
     /**
@@ -98,11 +96,6 @@ class Sql_cmd_dump_table final : public Sql_cmd {
     Sql_cmd_dump_table *cmd;
 
     /**
-      [in] Snapshot ID to use, if consistent read is enabled.
-    */
-    ulonglong snapshot_id;
-
-    /**
       [in] Pointer to table share.
     */
     TABLE_SHARE *share;
@@ -135,9 +128,8 @@ class Sql_cmd_dump_table final : public Sql_cmd {
 
   static void *dump_worker(void *arg);
 
-  bool start_threads(THD *thd, TABLE_SHARE *share, ulonglong snapshot_id,
-                     int nthreads, my_thread_handle *handles,
-                     Dump_worker_args *args);
+  bool start_threads(THD *thd, TABLE_SHARE *share, int nthreads,
+                     my_thread_handle *handles, Dump_worker_args *args);
   bool dump_chunk(Table_ref *tr, mem_root_deque<Item *> &list,
                   Dump_work_item *work);
   uchar *enqueue_chunk(THD *thd, TABLE *table, uchar *start_ref, uchar *end_row,
@@ -151,7 +143,4 @@ class Sql_cmd_dump_table final : public Sql_cmd {
 
   // Chunk size. In rows for now, later can be other units such as MB.
   int m_chunk_size{128};
-
-  // Should a consistent snapshot be used? Not all storage engines support it.
-  bool m_consistent{false};
 };

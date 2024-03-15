@@ -15007,12 +15007,6 @@ opt_dump_option:
     $$.chunk_size = n;
   }
 
-  | CONSISTENT_SYM SNAPSHOT_SYM
-  {
-    $$.clear();
-    $$.consistent = true;
-  }
-
   ;
 
 /* Common definitions */
