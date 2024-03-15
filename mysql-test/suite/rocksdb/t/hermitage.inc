@@ -12,13 +12,10 @@ DROP TABLE IF EXISTS test;
 
 connect (con1,localhost,root,,);
 eval SET SESSION TRANSACTION ISOLATION LEVEL $trx_isolation;
-eval SET SESSION rocksdb_skip_snapshot_validation=$skip_snapshot_validation;
 connect (con2,localhost,root,,);
 eval SET SESSION TRANSACTION ISOLATION LEVEL $trx_isolation;
-eval SET SESSION rocksdb_skip_snapshot_validation=$skip_snapshot_validation;
 connect (con3,localhost,root,,);
 eval SET SESSION TRANSACTION ISOLATION LEVEL $trx_isolation;
-eval SET SESSION rocksdb_skip_snapshot_validation=$skip_snapshot_validation;
 
 connection con1;
 
@@ -128,17 +125,10 @@ if ($trx_isolation == "READ COMMITTED")
 }
 if ($trx_isolation == "REPEATABLE READ")
 {
-  if ($skip_snapshot_validation == 0)
-  {
-    --error ER_LOCK_DEADLOCK
-    reap;
-    select variable_value-@a from performance_schema.global_status where variable_name='rocksdb_snapshot_conflict_errors';
-  }
-  if ($skip_snapshot_validation == 1)
-  {
-    reap;
-    select * from test;
-  }
+  --error ER_LOCK_DEADLOCK
+  reap;
+  select variable_value-@a from performance_schema.global_status where variable_name='rocksdb_snapshot_conflict_errors';
+
 }
 commit;
 
@@ -165,16 +155,8 @@ if ($trx_isolation == "READ COMMITTED")
 }
 if ($trx_isolation == "REPEATABLE READ")
 {
-  if ($skip_snapshot_validation == 0)
-  {
-    --error ER_LOCK_DEADLOCK
-    reap;
-  }
-  if ($skip_snapshot_validation == 1)
-  {
-    reap;
-    select * from test;
-  }
+  --error ER_LOCK_DEADLOCK
+  reap;
 }
 commit;
 
@@ -225,16 +207,8 @@ if ($trx_isolation == "READ COMMITTED")
 }
 if ($trx_isolation == "REPEATABLE READ")
 {
-  if ($skip_snapshot_validation == 0)
-  {
-    --error ER_LOCK_DEADLOCK
-    delete from test where value = 20;
-  }
-  if ($skip_snapshot_validation == 1)
-  {
-    delete from test where value = 20; # doesn't delete anything
-    select * from test where id = 2; # shows 2 => 18
-  }
+  --error ER_LOCK_DEADLOCK
+  delete from test where value = 20;
 }
 commit;
 
