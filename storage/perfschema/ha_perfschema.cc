@@ -834,12 +834,12 @@ static bool pfs_show_status(handlerton *, THD *thd, stat_print_fn *print,
         size = digest_hash.size;
         break;
       case 147:
-        name = "(mysql_filename_hash).count";
-        size = mysql_filename_hash.count;
+        name = "(filename_hash).count";
+        size = filename_hash.count;
         break;
       case 148:
-        name = "(mysql_filename_hash).size";
-        size = mysql_filename_hash.size;
+        name = "(filename_hash).size";
+        size = filename_hash.size;
         break;
       case 149:
         name = "(host_hash).count";
