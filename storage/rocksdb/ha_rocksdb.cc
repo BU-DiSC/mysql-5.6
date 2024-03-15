@@ -5989,7 +5989,7 @@ static int rocksdb_close_connection(
     rocksdb_remove_checkpoint(checkpoint_dir);
   }
   if (get_ha_data(thd)->get_disable_file_deletions()) {
-    rdb->EnableFileDeletions();
+    rdb->EnableFileDeletions(false);
   }
   destroy_ha_data(thd);
   return HA_EXIT_SUCCESS;
@@ -6047,7 +6047,7 @@ static void rocksdb_disable_file_deletions_update(
     rdb->DisableFileDeletions();
     get_ha_data(thd)->set_disable_file_deletions(true);
   } else if (!val && old_val) {
-    rdb->EnableFileDeletions();
+    rdb->EnableFileDeletions(false);
     get_ha_data(thd)->set_disable_file_deletions(false);
   }
 }
@@ -17127,6 +17127,7 @@ struct rocksdb_status_counters_t {
   uint64_t number_superversion_acquires;
   uint64_t number_superversion_releases;
   uint64_t number_superversion_cleanups;
+  uint64_t number_block_not_compressed;
 };
 
 static rocksdb_status_counters_t rocksdb_status_counters;
@@ -17209,6 +17210,7 @@ DEF_SHOW_FUNC(compact_write_bytes, COMPACT_WRITE_BYTES)
 DEF_SHOW_FUNC(number_superversion_acquires, NUMBER_SUPERVERSION_ACQUIRES)
 DEF_SHOW_FUNC(number_superversion_releases, NUMBER_SUPERVERSION_RELEASES)
 DEF_SHOW_FUNC(number_superversion_cleanups, NUMBER_SUPERVERSION_CLEANUPS)
+DEF_SHOW_FUNC(number_block_not_compressed, NUMBER_BLOCK_NOT_COMPRESSED)
 
 static void myrocks_update_status() {
   export_stats.rows_deleted = global_stats.rows[ROWS_DELETED];
@@ -17498,6 +17500,7 @@ static SHOW_VAR rocksdb_status_vars[] = {
     DEF_STATUS_VAR(number_superversion_acquires),
     DEF_STATUS_VAR(number_superversion_releases),
     DEF_STATUS_VAR(number_superversion_cleanups),
+    DEF_STATUS_VAR(number_block_not_compressed),
     DEF_STATUS_VAR_PTR("binlog_ttl_compaction_timestamp",
                        &rocksdb_binlog_ttl_compaction_timestamp, SHOW_LONGLONG),
     DEF_STATUS_VAR_PTR("row_lock_deadlocks", &rocksdb_row_lock_deadlocks,
