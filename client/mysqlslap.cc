@@ -432,11 +432,7 @@ int main(int argc, char **argv) {
 
     if (!opt_preserve) drop_schema(&mysql, create_schema_string);
 
-    if (eptr != nullptr) {
-      eptr = eptr->next;
-    }
-
-  } while (eptr != nullptr);
+  } while (eptr ? (eptr = eptr->next) : nullptr);
 
   native_mutex_destroy(&counter_mutex);
   native_cond_destroy(&count_threshold);
