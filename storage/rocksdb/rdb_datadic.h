@@ -591,8 +591,7 @@ class Rdb_key_def {
     KEY_MAY_BE_COVERED = 3,
   };
 
-  [[nodiscard]] uint setup(const TABLE &table, const Rdb_tbl_def &tbl_def,
-                           Rdb_cmd_srv_helper &cmd_srv_helper);
+  [[nodiscard]] uint setup(const TABLE &table, const Rdb_tbl_def &tbl_def);
 
   [[nodiscard]] static uint extract_ttl_duration(const TABLE &table_arg,
                                                  const Rdb_tbl_def &tbl_def_arg,
@@ -861,8 +860,7 @@ class Rdb_key_def {
   std::unique_ptr<Rdb_vector_index> m_vector_index;
 
   [[nodiscard]] uint setup_vector_index(const TABLE &tbl,
-                                        const Rdb_tbl_def &tbl_def,
-                                        Rdb_cmd_srv_helper &cmd_srv_helper);
+                                        const Rdb_tbl_def &tbl_def);
 
   static void pack_variable_format(const uchar *src, size_t src_len,
                                    uchar **dst);
