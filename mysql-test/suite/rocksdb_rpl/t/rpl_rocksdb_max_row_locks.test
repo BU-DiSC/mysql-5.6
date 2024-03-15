@@ -1,7 +1,6 @@
 --source include/have_rocksdb.inc
---source include/have_binlog_format_row.inc
---source include/have_innodb_system_tables.inc
 --source include/master-slave.inc
+--source include/have_binlog_format_row.inc
 
 connection master;
 CREATE TABLE t1 (a INT, b INT, c INT, PRIMARY KEY (a), KEY (B), KEY(c)) ENGINE=ROCKSDB;
