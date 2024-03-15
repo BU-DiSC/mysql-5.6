@@ -21,10 +21,11 @@
 #include <unordered_map>
 
 /* MySQL header files */
-#include "my_compiler.h"
+#include "m_ctype.h"
 
 /* RocksDB header files */
 #include "rocksdb/table.h"
+#include "rocksdb/utilities/options_util.h"
 
 /* MyRocks header files */
 #include "./rdb_global.h"

@@ -16,12 +16,14 @@
 #pragma once
 #ifdef WITH_FB_VECTORDB
 #include <faiss/Index.h>
+#endif
 #include <memory>
 #include <shared_mutex>
 #include <unordered_map>
-#endif
+#include "./rdb_global.h"
 #include "rdb_utils.h"
 #include "sql/item_fb_vector_func.h"
+#include "sql/item_json_func.h"
 
 namespace myrocks {
 

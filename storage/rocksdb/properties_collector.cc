@@ -23,6 +23,10 @@
 #include <string>
 #include <vector>
 
+/* MySQL header files */
+#include "./my_stacktrace.h"
+#include "sql/sql_array.h"
+
 /* MyRocks header files */
 #include "./rdb_datadic.h"
 #include "./rdb_utils.h"

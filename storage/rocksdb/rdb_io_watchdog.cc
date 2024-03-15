@@ -25,9 +25,6 @@
 
 #include <fcntl.h>
 
-// MyRocks header files
-#include "rdb_utils.h"
-
 namespace myrocks {
 
 void Rdb_io_watchdog::expire_io_callback(

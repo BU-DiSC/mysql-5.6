@@ -1,7 +1,13 @@
 #include "./rdb_nosql_digest.h"
 
 /* MySQL header files */
+#include "sql/lexer_yystype.h"
+#include "sql/mysqld.h"
+#include "sql/sql_lex_hash.h"
 #include "sql/sql_yacc.h"
+
+/* PerfSchema header files */
+#include "storage/perfschema/pfs_server.h"
 
 namespace myrocks {
 

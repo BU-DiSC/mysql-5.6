@@ -18,8 +18,12 @@
 
 /* C++ standard header files */
 #include <atomic>
+#include <condition_variable>
+#include <mutex>
+#include <queue>
 #include <stack>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 

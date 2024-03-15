@@ -21,9 +21,7 @@
 #endif
 
 /* C++ system header files */
-#ifndef NDEBUG
-#include <ctime>
-#endif
+#include <time.h>
 #include <optional>
 #include <string>
 

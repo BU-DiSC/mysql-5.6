@@ -18,13 +18,14 @@
 #include "./rdb_sst_info.h"
 
 /* C++ standard header files */
-#include <cinttypes>
+#include <inttypes.h>
 #include <cstdio>
 #include <string>
 #include <utility>
 #include <vector>
 
 /* MySQL header files */
+#include "./my_dir.h"
 #include "mysqld_error.h"
 
 /* RocksDB header files */
@@ -34,7 +35,9 @@
 #include "rocksdb/options.h"
 
 /* MyRocks header files */
+#include "./ha_rocksdb.h"
 #include "./ha_rocksdb_proto.h"
+#include "./rdb_cf_options.h"
 #include "./rdb_psi.h"
 
 namespace myrocks {

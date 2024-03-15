@@ -21,15 +21,17 @@
 /* C++ standard header files */
 #include <signal.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 #include <atomic>
-#include <cassert>
 #include <string>
 #include <vector>
 
 /* MySQL header files */
-#include "mysql/psi/mysql_mutex.h"
-#include "thr_mutex.h"
+#include "./my_stacktrace.h"
+
+/* MyRocks header files */
+#include "./rdb_utils.h"
 
 namespace myrocks {
 
