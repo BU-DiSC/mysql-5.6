@@ -4556,7 +4556,7 @@ class Rdb_transaction {
   virtual rocksdb::Status delete_key(
       rocksdb::ColumnFamilyHandle *const column_family,
       const rocksdb::Slice &key, TABLE_TYPE table_type,
-      const bool assume_tracked) = 0;
+      const bool assume_tracked, uint64_t dpt = 0) = 0;
   virtual rocksdb::Status single_delete(
       rocksdb::ColumnFamilyHandle *const column_family,
       const rocksdb::Slice &key, TABLE_TYPE table_type,
@@ -5086,11 +5086,12 @@ class Rdb_transaction_impl : public Rdb_transaction {
 
   rocksdb::Status delete_key(rocksdb::ColumnFamilyHandle *const column_family,
                              const rocksdb::Slice &key, TABLE_TYPE table_type,
-                             const bool assume_tracked) override {
+                             const bool assume_tracked, uint64_t dpt) override {
     assert(!is_ac_nl_ro_rc_transaction());
 
     ++m_write_count[table_type];
-    return m_rocksdb_tx[table_type]->Delete(column_family, key, assume_tracked);
+    return m_rocksdb_tx[table_type]->Delete(column_family, key, assume_tracked,
+                                            dpt);
   }
 
   rocksdb::Status single_delete(
@@ -5548,8 +5549,8 @@ class Rdb_writebatch_impl : public Rdb_transaction {
 
   rocksdb::Status delete_key(rocksdb::ColumnFamilyHandle *const column_family,
                              const rocksdb::Slice &key, TABLE_TYPE table_type,
-                             const bool assume_tracked
-                                 MY_ATTRIBUTE((unused))) override {
+                             const bool /*assume_tracked*/,
+                             uint64_t /*dpt*/) override {
     assert(!is_ac_nl_ro_rc_transaction());
 
     if (table_type == TABLE_TYPE::INTRINSIC_TMP) {
@@ -13453,8 +13454,9 @@ int ha_rocksdb::delete_row(const uchar *const buf) {
   DBUG_PRINT("info", ("Deleting row with DPT: %ld", dpt));
 
   const uint index = pk_index(*table, *m_tbl_def);
-  rocksdb::Status s = delete_or_singledelete(
-      index, tx, m_pk_descr->get_cf(), key_slice, m_tbl_def->get_table_type());
+  rocksdb::Status s =
+      delete_or_singledelete(index, tx, m_pk_descr->get_cf(), key_slice,
+                             m_tbl_def->get_table_type(), dpt);
   if (!s.ok()) {
     DBUG_RETURN(tx->set_status_error(table->in_use, s, *m_pk_descr, m_tbl_def,
                                      m_table_handler));
@@ -13550,12 +13552,12 @@ int ha_rocksdb::delete_row(const uchar *const buf) {
 rocksdb::Status ha_rocksdb::delete_or_singledelete(
     uint index, Rdb_transaction *const tx,
     rocksdb::ColumnFamilyHandle *const column_family, const rocksdb::Slice &key,
-    TABLE_TYPE table_type) {
+    TABLE_TYPE table_type, uint64_t dpt) {
   const bool assume_tracked = can_assume_tracked(ha_thd());
-  if (can_use_single_delete(index)) {
+  if (can_use_single_delete(index) && dpt == 0) {
     return tx->single_delete(column_family, key, table_type, assume_tracked);
   }
-  return tx->delete_key(column_family, key, table_type, assume_tracked);
+  return tx->delete_key(column_family, key, table_type, assume_tracked, dpt);
 }
 
 int ha_rocksdb::adjust_handler_stats_table_scan(ha_statistics *ha_stats,

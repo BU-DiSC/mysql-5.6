@@ -661,7 +661,8 @@ class ha_rocksdb : public my_core::handler, public blob_buffer {
   rocksdb::Status delete_or_singledelete(uint index, Rdb_transaction *const tx,
                                          rocksdb::ColumnFamilyHandle *const cf,
                                          const rocksdb::Slice &key,
-                                         TABLE_TYPE table_type)
+                                         TABLE_TYPE table_type,
+                                         uint64_t dpt = 0)
       MY_ATTRIBUTE((__warn_unused_result__));
 
   int index_next(uchar *const buf) override
