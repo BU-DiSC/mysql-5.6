@@ -652,6 +652,27 @@ struct System_variables {
    maximum vector dimension.
   */
   uint fb_vector_max_dimension;
+
+  /**
+    This parameter controls the vector search radius for a query
+    vector when doing nearest neighbour search or similarity search.
+  */
+  uint fb_vector_search_nprobe;
+
+  /**
+    This parameter makes the optimizer prefer the vector index over
+    a table scan followed by filesort, by reducing the cost of vector search
+    via vector index by this factor.
+  */
+  uint fb_vector_index_cost_factor;
+
+  /**
+    This parameter acts counters the filtering effect of a query by
+    fetching more KNN result from FAISS so that the query LIMIT can be
+    satisfied.
+  */
+  uint fb_vector_search_limit_multiplier;
+
 };
 
 /**

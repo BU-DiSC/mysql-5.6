@@ -80,7 +80,11 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA
 // Not using syslog but EventLog on Win32, so a dummy facility is enough.
 #define LOG_USER 0
 #else
+#ifdef MYSQL_BUCK_SUPPORT
+#include <editline/readline.h>
+#else
 #include <readline.h>
+#endif  // MYSQL_BUCK_SUPPORT
 #include <syslog.h>
 
 #define HAVE_READLINE
@@ -4788,7 +4792,7 @@ static bool init_connection_options(MYSQL *mysql) {
     mysql_options(mysql, MYSQL_INIT_COMMAND, init_command);
   }
 
-  mysql_set_character_set(mysql, default_charset);
+  if (mysql_set_character_set(mysql, default_charset)) return true;
 
   if (opt_plugin_dir && *opt_plugin_dir)
     mysql_options(mysql, MYSQL_PLUGIN_DIR, opt_plugin_dir);

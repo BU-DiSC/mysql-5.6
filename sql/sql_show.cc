@@ -722,7 +722,7 @@ bool Sql_cmd_show_raft_logs::check_privileges(THD *) {
 }
 
 bool Sql_cmd_show_raft_logs::execute_inner(THD *thd) {
-  return show_raft_logs(thd);
+  return show_raft_logs(thd, lex->with_gtid);
 }
 
 bool Sql_cmd_show_raft_status::check_privileges(THD *thd) {
@@ -2714,16 +2714,22 @@ static void store_fb_vector_index_options(String *packet, KEY *key_info) {
   packet->append(fb_vector_index_type_str);
   packet->append("'");
 
-  packet->append(" FB_VECTOR_INDEX_METRIC '");
-  auto fb_vector_index_metric_str =
-      fb_vector_index_metric_to_string(vector_index_info.metric());
-
-  packet->append(fb_vector_index_metric_str);
-  packet->append("'");
-
   packet->append(" FB_VECTOR_DIMENSION ");
   auto dimension_str = std::to_string(vector_index_info.dimension());
   packet->append(dimension_str);
+
+  auto trained_index_table = vector_index_info.trained_index_table();
+  if (trained_index_table.length > 0) {
+    packet->append(" FB_VECTOR_TRAINED_INDEX_TABLE '");
+    packet->append(trained_index_table);
+    packet->append("'");
+  }
+  auto trained_index_id = vector_index_info.trained_index_id();
+  if (trained_index_id.length > 0) {
+    packet->append(" FB_VECTOR_TRAINED_INDEX_ID '");
+    packet->append(trained_index_id);
+    packet->append("'");
+  }
 }
 
 static void store_key_options(THD *thd, String *packet, TABLE *table,

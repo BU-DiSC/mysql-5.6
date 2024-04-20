@@ -19,7 +19,6 @@
 #pragma once
 
 /* C++ standard header files */
-#include <limits>
 #include <string>
 #include <vector>
 
@@ -28,8 +27,8 @@
 #endif
 
 /* MySQL header files */
-#include "./sql_string.h"
-#include "sql/handler.h" /* handler */
+#include "my_base.h"
+#include "my_inttypes.h"
 
 /* MyRocks headers */
 #include "./ut0counter.h"
@@ -360,6 +359,7 @@ static_assert(HA_ERR_ROCKSDB_FIRST > HA_ERR_LAST,
 const char *const rocksdb_hton_name = "ROCKSDB";
 
 using Index_id = uint32_t;
+constexpr size_t INDEX_NUMBER_SIZE = 4;
 
 typedef struct _gl_index_id_s {
   uint32_t cf_id;

@@ -1435,10 +1435,14 @@ void warn_about_deprecated_binary(THD *thd)
 %token<lexer.keyword> PRIVACY_POLICY 10012          /* FB MYSQL */
 %token<lexer.keyword> FB_VECTOR_DIMENSION_SYM 10013     /* FB MYSQL */
 %token<lexer.keyword> FB_VECTOR_INDEX_TYPE_SYM 10014    /* FB MYSQL */
-%token<lexer.keyword> FB_VECTOR_INDEX_METRIC_SYM 10015  /* FB MYSQL */
-%token<lexer.keyword> DUMP_SYM 10016                    /* FB MYSQL */
-%token<lexer.keyword> THREADS_SYM 10017                 /* FB MYSQL */
-%token<lexer.keyword> CHUNK_SIZE_SYM 10018              /* FB MYSQL */
+%token<lexer.keyword> FB_VECTOR_TRAINED_INDEX_ID_SYM 10015    /* FB MYSQL */
+%token<lexer.keyword> FB_VECTOR_TRAINED_INDEX_TABLE_SYM 10016  /* FB MYSQL */
+%token<lexer.keyword> DUMP_SYM 10017                    /* FB MYSQL */
+%token<lexer.keyword> THREADS_SYM 10018                 /* FB MYSQL */
+%token<lexer.keyword> CHUNK_SIZE_SYM 10019              /* FB MYSQL */
+%token<lexer.keyword> KB_SYM 10020              /* FB MYSQL */
+%token<lexer.keyword> MB_SYM 10021              /* FB MYSQL */
+%token<lexer.keyword> GB_SYM 10022              /* FB MYSQL */
 
 /*
   Resolve column attribute ambiguity -- force precedence of "UNIQUE KEY" against
@@ -1791,6 +1795,8 @@ void warn_about_deprecated_binary(THD *thd)
 %type <ulonglong_number> query_spec_option
 
 %type <select_options> select_option select_option_list select_options
+
+%type <chunk_unit> chunk_unit_spec
 
 %type <dump_table_opts> opt_dump_option opt_dump_options opt_dump_option_clause
 
@@ -8111,13 +8117,17 @@ common_index_option:
           {
             $$ = make_fb_vector_index_type_attribute(YYMEM_ROOT, to_lex_cstring($3));
           }
-        | FB_VECTOR_INDEX_METRIC_SYM opt_equal TEXT_STRING_sys
-          {
-            $$ = make_fb_vector_index_metric_attribute(YYMEM_ROOT, to_lex_cstring($3));
-          }
         | FB_VECTOR_DIMENSION_SYM opt_equal ulong_num
           {
             $$ = make_fb_vector_index_dimension_attribute(YYMEM_ROOT, $3);
+          }
+        | FB_VECTOR_TRAINED_INDEX_ID_SYM opt_equal TEXT_STRING_sys
+          {
+            $$ = make_fb_vector_trained_index_id_attribute(YYMEM_ROOT, to_lex_cstring($3));
+          }
+        | FB_VECTOR_TRAINED_INDEX_TABLE_SYM opt_equal TEXT_STRING_sys
+          {
+            $$ = make_fb_vector_trained_index_table_attribute(YYMEM_ROOT, to_lex_cstring($3));
           }
         ;
 
@@ -13921,7 +13931,7 @@ show_binary_logs_stmt:
         ;
 
 show_raft_logs_stmt:
-          SHOW RAFT_SYM LOGS_SYM
+          SHOW RAFT_SYM LOGS_SYM gtid_bool
           {
             $$ = NEW_PTN PT_show_raft_logs(@$);
           }
@@ -14996,7 +15006,7 @@ opt_dump_option:
     $$.nthreads = n;
   }
 
-  | CHUNK_SIZE_SYM EQ NUM ROWS_SYM /* TODO: support N {ROWS | KB | MB | GB} */
+  | CHUNK_SIZE_SYM EQ NUM chunk_unit_spec
   {
     int n = atol($3.str);
     if (n <= 0) {
@@ -15005,8 +15015,34 @@ opt_dump_option:
     }
     $$.clear();
     $$.chunk_size = n;
+    $$.chunk_unit = $4;
   }
 
+  | CONSISTENT_SYM SNAPSHOT_SYM
+  {
+    $$.clear();
+    $$.consistent = true;
+  }
+
+  ;
+
+chunk_unit_spec:
+  ROWS_SYM
+  {
+    $$ = Chunk_unit::ROWS;
+  }
+  | KB_SYM
+  {
+    $$ = Chunk_unit::KB;
+  }
+  | MB_SYM
+  {
+    $$ = Chunk_unit::MB;
+  }
+  | GB_SYM
+  {
+    $$ = Chunk_unit::GB;
+  }
   ;
 
 /* Common definitions */
@@ -15765,6 +15801,7 @@ ident_keywords_unambiguous:
                                 ER_WARN_DEPRECATED_IDENT,
                                 ER_THD(thd, ER_WARN_DEPRECATED_IDENT), "FULL");
           }
+        | GB_SYM
         | GENERAL
         | GENERATE_SYM
         | GEOMETRYCOLLECTION_SYM
@@ -15800,6 +15837,7 @@ ident_keywords_unambiguous:
         | ISSUER_SYM
         | JSON_SYM
         | JSON_VALUE_SYM
+        | KB_SYM
         | KEY_BLOCK_SIZE
         | KEYRING_SYM
         | LAST_SYM
@@ -15844,6 +15882,7 @@ ident_keywords_unambiguous:
         | MAX_SIZE_SYM
         | MAX_UPDATES_PER_HOUR
         | MAX_USER_CONNECTIONS_SYM
+        | MB_SYM
         | MEDIUM_SYM
         | MEMBER_SYM
         | MEMORY_SYM

@@ -3674,6 +3674,8 @@ Sql_cmd *PT_dump_table::make_cmd(THD *thd) {
   m_opts.init();
   m_cmd.set_thread_count(m_opts.nthreads);
   m_cmd.set_chunk_size(m_opts.chunk_size);
+  m_cmd.set_chunk_unit(m_opts.chunk_unit);
+  m_cmd.set_consistent(m_opts.consistent);
   Query_block *const select = lex->current_query_block();
   if (!select->add_table_to_list(thd, m_cmd.get_table(), nullptr, 0))
     return nullptr;
@@ -4885,22 +4887,6 @@ PT_base_index_option *make_fb_vector_index_type_attribute(MEM_ROOT *mem_root,
 }
 
 /**
-   create a fb_vector index metric attribute
-   @param mem_root Memory arena.
-   @param attr     Attribute value from parser.
-
-   @return PT_base_index_option* to PT_attribute object.
- */
-PT_base_index_option *make_fb_vector_index_metric_attribute(MEM_ROOT *mem_root,
-                                                            LEX_CSTRING attr) {
-  return new (mem_root) PT_attribute<LEX_CSTRING, PT_base_index_option>(
-      attr, +[](LEX_CSTRING a, Table_ddl_parse_context *pc) {
-        pc->key_create_info->m_fb_vector_index_metric = a;
-        return false;
-      });
-}
-
-/**
    create a fb_vector index dimension attribute
    @param mem_root Memory arena.
    @param attr     Attribute value from parser.
@@ -4912,6 +4898,40 @@ PT_base_index_option *make_fb_vector_index_dimension_attribute(
   return new (mem_root) PT_attribute<ulong, PT_base_index_option>(
       attr, +[](ulong a, Table_ddl_parse_context *pc) {
         pc->key_create_info->m_fb_vector_dimension = a;
+        return false;
+      });
+}
+
+/**
+   create a fb_vector trained index id attribute
+
+   @param mem_root Memory arena.
+   @param attr     Attribute value from parser.
+
+   @return PT_base_index_option* to PT_attribute object.
+ */
+PT_base_index_option *make_fb_vector_trained_index_id_attribute(
+    MEM_ROOT *mem_root, LEX_CSTRING attr) {
+  return new (mem_root) PT_attribute<LEX_CSTRING, PT_base_index_option>(
+      attr, +[](LEX_CSTRING a, Table_ddl_parse_context *pc) {
+        pc->key_create_info->m_fb_vector_trained_index_id = a;
+        return false;
+      });
+}
+
+/**
+   create a fb_vector trained index table attribute
+
+   @param mem_root Memory arena.
+   @param attr     Attribute value from parser.
+
+   @return PT_base_index_option* to PT_attribute object.
+ */
+PT_base_index_option *make_fb_vector_trained_index_table_attribute(
+    MEM_ROOT *mem_root, LEX_CSTRING attr) {
+  return new (mem_root) PT_attribute<LEX_CSTRING, PT_base_index_option>(
+      attr, +[](LEX_CSTRING a, Table_ddl_parse_context *pc) {
+        pc->key_create_info->m_fb_vector_trained_index_table = a;
         return false;
       });
 }

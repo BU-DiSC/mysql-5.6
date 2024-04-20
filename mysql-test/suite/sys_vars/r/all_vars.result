@@ -144,6 +144,8 @@ mandatory_roles
 mandatory_roles
 master_verify_checksum
 master_verify_checksum
+max_binlog_cache_overhead_size
+max_binlog_cache_overhead_size
 max_length_for_sort_data
 max_length_for_sort_data
 optimizer_max_subgraph_pairs
@@ -202,6 +204,8 @@ select_into_disk_sync
 select_into_disk_sync
 select_into_disk_sync_delay
 select_into_disk_sync_delay
+set_write_error_on_cache_error
+set_write_error_on_cache_error
 shardbeat_interval_ms
 shardbeat_interval_ms
 shardbeat_vlog_level
@@ -246,6 +250,8 @@ sql_require_primary_key
 sql_require_primary_key
 sql_slave_skip_counter
 sql_slave_skip_counter
+strict_enforce_binlog_cache_size
+strict_enforce_binlog_cache_size
 sync_master_info
 sync_master_info
 temptable_max_mmap

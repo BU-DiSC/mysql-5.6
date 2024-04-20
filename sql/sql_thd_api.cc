@@ -306,6 +306,16 @@ void thd_store_globals(THD *thd) { thd->store_globals(); }
 void thd_store_globals(THD *thd, pid_t id) { thd->store_globals(id); }
 
 /**
+  Specify if thread is managed by the scheduler or not.
+
+  @param thd                   THD object
+  @param managed_by_scheduler  True if managed, false otherwise.
+*/
+void thd_managed_by_scheduler(THD *thd, bool managed_by_scheduler) {
+  thd->set_managed_by_cpu_scheduler(managed_by_scheduler);
+}
+
+/**
   Get thread attributes for connection threads
 
   @retval      Reference to thread attribute for connection threads
@@ -623,6 +633,29 @@ int thd_killed(const void *v_thd) {
   if (thd == nullptr) thd = current_thd;
   if (thd == nullptr) return 0;
   return thd->killed;
+}
+
+/**
+  Check and yield AC/CPU if necessary. This should be called often,
+  especially from CPU-intensive loops. Make sure to not hold any mutex or
+  RW lock when calling it.
+
+  @param thd  Current thread handle. If this is a child thread,
+              pass the child THD, not the parent or user connection THD!
+              THD::check_yield() updates thd and is not thread-safe.
+*/
+void thd_check_yield(MYSQL_THD thd) {
+  if (!thd) {
+    thd = current_thd;
+  }
+
+  if (thd) {
+    // Verify that thd is current thread. If this thread has THD it should call
+    // THD::store_globals() to set current_thd.
+    assert(thd == current_thd);
+
+    thd->check_yield();
+  }
 }
 
 /**

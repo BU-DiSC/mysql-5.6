@@ -605,10 +605,36 @@ The following options may be given as the first argument:
  Set/unset failure injection points
  --fast-integer-to-string 
  Optimized implementation of integer to string conversion
+ --fb-vector-index-cost-factor[=#] 
+ A table scan plus filesort will be prohibitively
+ expensive for vector searches. This sysvar parameterizes
+ the preference for the vector index, reduces the vector
+ index cost by this factor, thereby making the optimizer
+ prefer the vector index for vector search. Default: 1000
  --fb-vector-max-dimension[=#] 
  maximum vector dimension
  --fb-vector-min-dimension[=#] 
  minimum vector dimension
+ --fb-vector-search-limit-multiplier[=#] 
+ This parameter indicates to the storage engine the
+ filtering effect of a SQL query due to WHERE and HAVING
+ clauses. This is used to fetch more nearest neighbours
+ from FAISS so that the LIMIT can still be satisfied. This
+ applies to all vector index types.This session default
+ can be superceded by a query level override: 'SELECT /*+
+ SET_VAR(fb_vector_search_limit_multiplier = 3) */ ... '.
+ Default: 10
+ --fb-vector-search-nprobe[=#] 
+ This parameter controls the vector search radius for a
+ query vector when doing nearest neighbour search or
+ similarity search. The nprobe value corresponds to the
+ number of closest centroids that become part of the
+ vector search space. Only vectors in the nprobe-closest
+ voronoi cells or partitions are searched. This session
+ default can be superceded by a query level nprobe value
+ using a query hint like this: 'SELECT /*+
+ SET_VAR(fb_vector_search_nprobe = 3) */ ... '. Default:
+ 16
  --filesort-max-file-size=# 
  The max size of a file to use for filesort. Raise an
  error when this is exceeded. 0 means no limit.
@@ -1000,6 +1026,10 @@ The following options may be given as the first argument:
  instead.
  --max-allowed-packet=# 
  Max packet length to send to or receive from the server
+ --max-binlog-cache-overhead-size[=#] 
+ Max additional overhead in bytes needed for extra log
+ events (ie. gtid and metadata) added within
+ ordered_commit().
  --max-binlog-cache-size=# 
  Sets the total size of the transactional cache
  --max-binlog-dump-events=# 
@@ -1708,6 +1738,11 @@ The following options may be given as the first argument:
  thread on this replica encounters one of these errors
  while applying a Query_log_event, it will ignore the
  error, rather than stop.
+ --replica-sql-thread-os-priority[=#] 
+ Set OS priority for replication SQL threads. This is a
+ global variable. New SQL threads pick the value after
+ changing it. The values are in the range -20 to 19,
+ similar to nice.
  --replica-sql-verify-checksum 
  Force checksum verification of replication events after
  reading them from relay log. Note: The replica always
@@ -1939,6 +1974,10 @@ The following options may be given as the first argument:
  --rocksdb-bulk-load-allow-unsorted 
  Allow unsorted input during bulk-load. Can be changed
  only when bulk load is disabled.
+ --rocksdb-bulk-load-enable-unique-key-check 
+ Check the violation of unique key constraint during
+ bulk-load. Can be changed only when bulk load is
+ disabled.
  --rocksdb-bulk-load-fail-if-not-bottommost-level 
  Fail the bulk load if a sst file created from bulk load
  cannot fit in the rocksdb bottommost level. Turn off this
@@ -2178,6 +2217,9 @@ The following options may be given as the first argument:
  rows may disappear in the middle of transactions as they
  are dropped during compaction. Use with caution.
  (Defaults to on; use --skip-rocksdb-enable-ttl-read-filtering to disable.)
+ --rocksdb-enable-udt-in-mem 
+ Enabled user define timestamp in memtable feature to
+ support HLC snapshot reads in MyRocks
  --rocksdb-enable-write-thread-adaptive-yield 
  DBOptions::enable_write_thread_adaptive_yield for RocksDB
  --rocksdb-error-if-exists 
@@ -2188,8 +2230,12 @@ The following options may be given as the first argument:
  (Defaults to on; use --skip-rocksdb-error-on-suboptimal-collation to disable.)
  --rocksdb-fault-injection-options=name 
  Fault injection options for running rocksdb tests
- --rocksdb-file-checksums 
- Whether to write and check RocksDB file-level checksums
+ --rocksdb-file-checksums[=name] 
+ Whether to write and check RocksDB file-level checksums.
+ CHECKSUMS_OFF: nothing, CHECKSUMS_WRITE_ONLY: write
+ checksums but skips verification,
+ CHECKSUMS_WRITE_AND_VERIFY: write checksums, and verify
+ on DB::open
  --rocksdb-flush-log-at-trx-commit=# 
  Sync on transaction commit. Similar to
  innodb_flush_log_at_trx_commit. 1: sync on commit, 0,2:
@@ -2225,6 +2271,14 @@ The following options may be given as the first argument:
  Filter level for info logs to be written mysqld error
  log. Valid values include 'debug_level', 'info_level',
  'warn_level''error_level' and 'fatal_level'.
+ --rocksdb-invalid-create-option-action=name 
+ Control behavior when creating the table hits some error.
+ We can log the error only, pass the query and give users
+ a warning, or fail the query.
+ --rocksdb-io-error-action=name 
+ Control behavior when hitting I/O error. By default
+ MyRocks aborts server and refuses to start. Setting
+ IGNORE_ERROR suppresses an error instead.
  --rocksdb-io-write-timeout=# 
  Timeout for experimental I/O watchdog.
  --rocksdb-is-fd-close-on-exec 
@@ -2441,6 +2495,10 @@ The following options may be given as the first argument:
  Skip filling block cache on read requests
  --rocksdb-skip-locks-if-skip-unique-check 
  Skip row locking when unique checks are disabled.
+ --rocksdb-skip-snapshot-validation 
+ Skips snapshot validation on locking reads. This makes
+ MyRocks Repeatable Read behavior close to InnoDB --
+ forcing reading the newest data with locking reads.
  --rocksdb-sst-mgr-rate-bytes-per-sec=# 
  DBOptions::sst_file_manager rate_bytes_per_sec for
  RocksDB
@@ -2527,6 +2585,8 @@ The following options may be given as the first argument:
  --rocksdb-use-hyper-clock-cache 
  Use HyperClockCache instead of default LRUCache for
  RocksDB
+ --rocksdb-use-io-uring 
+ Use io_uring for RocksDB
  --rocksdb-use-write-buffer-manager 
  For experiment only. Use write buffer manager
  --rocksdb-validate-tables=# 
@@ -2659,6 +2719,9 @@ The following options may be given as the first argument:
  Set read_only and super_read_only in shutdown path after
  trying to kill connections but before shutting down
  plugins
+ --set-write-error-on-cache-error 
+ Whether to mark binlog with a write error when we hit a
+ cache write error
  --sha256-password-proxy-users 
  If set to FALSE (the default), then the sha256_password
  authentication plugin will not signal for authenticated
@@ -2745,6 +2808,11 @@ The following options may be given as the first argument:
  --skip-slave-start  This option is deprecated. Use skip_replica_start
  instead.
  --skip-stack-trace  Don't print a stack trace on failure.
+ --skip-sys-tables-engine-check 
+ skip System Tables storage engine check. If True, System
+ Tables can use any supported storage engines; If False,
+ System Tables can only use
+ default_dd_system_storage_engine
  --slave-allow-batching 
  This option is deprecated. Use replica_allow_batching
  instead.
@@ -2970,6 +3038,9 @@ The following options may be given as the first argument:
  for one connection.
  --stored-program-definition-cache=# 
  The number of cached stored program definitions
+ --strict-enforce-binlog-cache-size 
+ Whether to strictly enforce max binlog cache size
+ (Defaults to on; use --skip-strict-enforce-binlog-cache-size to disable.)
  --super-read-only   Make all non-temporary tables read-only, with the
  exception for replication applier threads.  Users with
  the SUPER privilege are affected, unlike read_only. 
@@ -3372,8 +3443,11 @@ explicit-defaults-for-timestamp TRUE
 external-locking FALSE
 failure-injection-points 
 fast-integer-to-string FALSE
+fb-vector-index-cost-factor 1000
 fb-vector-max-dimension 4096
 fb-vector-min-dimension 3
+fb-vector-search-limit-multiplier 10
+fb-vector-search-nprobe 16
 filesort-max-file-size 0
 flush FALSE
 flush-only-old-table-cache-entries FALSE
@@ -3485,6 +3559,7 @@ master-info-repository TABLE
 master-retry-count 86400
 master-verify-checksum FALSE
 max-allowed-packet 67108864
+max-binlog-cache-overhead-size 1000
 max-binlog-cache-size 18446744073709547520
 max-binlog-dump-events 0
 max-binlog-size 1073741824
@@ -3691,6 +3766,7 @@ replica-parallel-workers 4
 replica-pending-jobs-size-max 134217728
 replica-preserve-commit-order TRUE
 replica-skip-errors (No default value)
+replica-sql-thread-os-priority 0
 replica-sql-verify-checksum TRUE
 replica-transaction-retries 10
 replica-type-conversions 
@@ -3732,6 +3808,7 @@ rocksdb-block-size-deviation 10
 rocksdb-bulk-load FALSE
 rocksdb-bulk-load-allow-sk FALSE
 rocksdb-bulk-load-allow-unsorted FALSE
+rocksdb-bulk-load-enable-unique-key-check FALSE
 rocksdb-bulk-load-fail-if-not-bottommost-level FALSE
 rocksdb-bulk-load-partial-index TRUE
 rocksdb-bulk-load-size 1000
@@ -3806,11 +3883,12 @@ rocksdb-enable-thread-tracking TRUE
 rocksdb-enable-tmp-table FALSE
 rocksdb-enable-ttl TRUE
 rocksdb-enable-ttl-read-filtering TRUE
+rocksdb-enable-udt-in-mem FALSE
 rocksdb-enable-write-thread-adaptive-yield FALSE
 rocksdb-error-if-exists FALSE
 rocksdb-error-on-suboptimal-collation TRUE
 rocksdb-fault-injection-options (No default value)
-rocksdb-file-checksums FALSE
+rocksdb-file-checksums CHECKSUMS_OFF
 rocksdb-flush-log-at-trx-commit 1
 rocksdb-force-compute-memtable-stats TRUE
 rocksdb-force-compute-memtable-stats-cachetime 60000000
@@ -3822,6 +3900,8 @@ rocksdb-ignore-unknown-options TRUE
 rocksdb-index-file-map ON
 rocksdb-index-type kBinarySearch
 rocksdb-info-log-level error_level
+rocksdb-invalid-create-option-action LOG
+rocksdb-io-error-action ABORT_SERVER
 rocksdb-io-write-timeout 0
 rocksdb-is-fd-close-on-exec TRUE
 rocksdb-keep-log-file-num 1000
@@ -3890,6 +3970,7 @@ rocksdb-sim-cache-size 0
 rocksdb-skip-bloom-filter-on-read FALSE
 rocksdb-skip-fill-cache FALSE
 rocksdb-skip-locks-if-skip-unique-check FALSE
+rocksdb-skip-snapshot-validation FALSE
 rocksdb-sst-mgr-rate-bytes-per-sec 0
 rocksdb-sst-props ON
 rocksdb-stats-dump-period-sec 600
@@ -3920,6 +4001,7 @@ rocksdb-use-direct-io-for-flush-and-compaction FALSE
 rocksdb-use-direct-reads FALSE
 rocksdb-use-fsync FALSE
 rocksdb-use-hyper-clock-cache FALSE
+rocksdb-use-io-uring FALSE
 rocksdb-use-write-buffer-manager FALSE
 rocksdb-validate-tables 1
 rocksdb-vector-index ON
@@ -3965,6 +4047,7 @@ session-track-state-change FALSE
 session-track-system-variables time_zone,autocommit,character_set_client,character_set_results,character_set_connection
 session-track-transaction-info OFF
 set-read-only-on-shutdown FALSE
+set-write-error-on-cache-error FALSE
 sha256-password-proxy-users FALSE
 shardbeat-blocked-dbs 
 shardbeat-interval-ms 60000
@@ -3992,6 +4075,7 @@ skip-networking FALSE
 skip-replica-start FALSE
 skip-show-database FALSE
 skip-slave-start FALSE
+skip-sys-tables-engine-check FALSE
 slave-allow-batching TRUE
 slave-check-before-image-consistency OFF
 slave-checkpoint-group 512
@@ -4045,6 +4129,7 @@ sql-wsenv-tenant
 sql-wsenv-uri-prefix 
 stored-program-cache 256
 stored-program-definition-cache 256
+strict-enforce-binlog-cache-size TRUE
 super-read-only FALSE
 symbolic-links FALSE
 sync-binlog 1

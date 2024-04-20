@@ -29,14 +29,10 @@
 #include "sql/sql_show.h"
 
 /* RocksDB header files */
-#include "rocksdb/version.h"
-#if ROCKSDB_MAJOR >= 8
 #include "rocksdb/advanced_cache.h"
-#endif  // ROCKSDB_MAJOR >= 8
 #include "rocksdb/compaction_filter.h"
 #include "rocksdb/convenience.h"
 #include "rocksdb/filter_policy.h"
-#include "rocksdb/memtablerep.h"
 #include "rocksdb/merge_operator.h"
 #include "rocksdb/slice_transform.h"
 #include "rocksdb/utilities/transaction_db.h"
@@ -1675,9 +1671,17 @@ enum {
   TABLE_NAME,
   INDEX_NAME,
   INDEX_TYPE,
-  METRIC_TYPE,
   DIMENSION,
-  NTOTAL
+  NTOTAL,
+  HIT,
+  CODE_SIZE,
+  NLIST,
+  PQ_M,
+  PQ_NBITS,
+  MIN_LIST_SIZE,
+  MAX_LIST_SIZE,
+  AVG_LIST_SIZE,
+  MEDIAN_LIST_SIZE,
 };
 }  // namespace RDB_VECTOR_INDEX_FIELD
 
@@ -1687,9 +1691,18 @@ static ST_FIELD_INFO rdb_i_s_vector_index_config_fields_info[] = {
     ROCKSDB_FIELD_INFO("TABLE_NAME", NAME_LEN + 1, MYSQL_TYPE_STRING, 0),
     ROCKSDB_FIELD_INFO("INDEX_NAME", NAME_LEN + 1, MYSQL_TYPE_STRING, 0),
     ROCKSDB_FIELD_INFO("INDEX_TYPE", 100, MYSQL_TYPE_STRING, 0),
-    ROCKSDB_FIELD_INFO("METRIC_TYPE", 100, MYSQL_TYPE_STRING, 0),
     ROCKSDB_FIELD_INFO("DIMENSION", sizeof(uint64), MYSQL_TYPE_LONGLONG, 0),
     ROCKSDB_FIELD_INFO("NTOTAL", sizeof(uint64), MYSQL_TYPE_LONGLONG, 0),
+    ROCKSDB_FIELD_INFO("HIT", sizeof(uint64), MYSQL_TYPE_LONGLONG, 0),
+    ROCKSDB_FIELD_INFO("CODE_SIZE", sizeof(uint64), MYSQL_TYPE_LONGLONG, 0),
+    ROCKSDB_FIELD_INFO("NLIST", sizeof(uint64), MYSQL_TYPE_LONGLONG, 0),
+    ROCKSDB_FIELD_INFO("PQ_M", sizeof(uint64), MYSQL_TYPE_LONGLONG, 0),
+    ROCKSDB_FIELD_INFO("PQ_NBITS", sizeof(uint64), MYSQL_TYPE_LONGLONG, 0),
+    ROCKSDB_FIELD_INFO("MIN_LIST_SIZE", sizeof(uint64), MYSQL_TYPE_LONGLONG, 0),
+    ROCKSDB_FIELD_INFO("MAX_LIST_SIZE", sizeof(uint64), MYSQL_TYPE_LONGLONG, 0),
+    ROCKSDB_FIELD_INFO("AVG_LIST_SIZE", sizeof(uint64), MYSQL_TYPE_LONGLONG, 0),
+    ROCKSDB_FIELD_INFO("MEDIAN_LIST_SIZE", sizeof(uint64), MYSQL_TYPE_LONGLONG,
+                       0),
     ROCKSDB_FIELD_INFO_END};
 
 int Rdb_vector_index_scanner::add_table(Rdb_tbl_def *tdef) {
@@ -1727,16 +1740,30 @@ int Rdb_vector_index_scanner::add_table(Rdb_tbl_def *tdef) {
         fb_vector_index_type_to_string(vector_config.type());
     field[RDB_VECTOR_INDEX_FIELD::INDEX_TYPE]->store(
         index_type.data(), index_type.size(), system_charset_info);
-    std::string_view metric_type =
-        fb_vector_index_metric_to_string(vector_config.metric());
-    field[RDB_VECTOR_INDEX_FIELD::METRIC_TYPE]->store(
-        metric_type.data(), metric_type.size(), system_charset_info);
     field[RDB_VECTOR_INDEX_FIELD::DIMENSION]->store(vector_config.dimension(),
                                                     true);
     auto vector_index = kd.get_vector_index();
     auto vector_index_info = vector_index->dump_info();
     field[RDB_VECTOR_INDEX_FIELD::NTOTAL]->store(vector_index_info.m_ntotal,
                                                  true);
+    field[RDB_VECTOR_INDEX_FIELD::HIT]->store(vector_index_info.m_hit, true);
+
+    field[RDB_VECTOR_INDEX_FIELD::CODE_SIZE]->store(
+        vector_index_info.m_code_size, true);
+    field[RDB_VECTOR_INDEX_FIELD::NLIST]->store(vector_index_info.m_nlist,
+                                                true);
+    field[RDB_VECTOR_INDEX_FIELD::PQ_M]->store(vector_index_info.m_pq_m, true);
+    field[RDB_VECTOR_INDEX_FIELD::PQ_NBITS]->store(vector_index_info.m_pq_nbits,
+                                                   true);
+
+    field[RDB_VECTOR_INDEX_FIELD::MIN_LIST_SIZE]->store(
+        vector_index_info.m_min_list_size, true);
+    field[RDB_VECTOR_INDEX_FIELD::MAX_LIST_SIZE]->store(
+        vector_index_info.m_max_list_size, true);
+    field[RDB_VECTOR_INDEX_FIELD::AVG_LIST_SIZE]->store(
+        vector_index_info.m_avg_list_size, true);
+    field[RDB_VECTOR_INDEX_FIELD::MEDIAN_LIST_SIZE]->store(
+        vector_index_info.m_median_list_size, true);
 
     ret = my_core::schema_table_store_record(m_thd, m_table);
     if (ret) return ret;
@@ -2064,8 +2091,8 @@ static int rdb_i_s_index_file_map_fill_table(
           sst_name.data(), sst_name.size(), system_charset_info);
 
       /* Get the __indexstats__ data out of the table property */
-      std::vector<Rdb_index_stats> stats;
-      Rdb_tbl_prop_coll::read_stats_from_tbl_props(props.second, &stats);
+      const auto stats =
+          Rdb_tbl_prop_coll::read_stats_from_tbl_props(*props.second);
 
       if (stats.empty()) {
         field[RDB_INDEX_FILE_MAP_FIELD::COLUMN_FAMILY]->store(-1, true);
@@ -2184,8 +2211,8 @@ static int rdb_i_s_lock_info_fill_table(
   for (const auto &lock : lock_info) {
     const uint32_t cf_id = lock.first;
     const auto &key_lock_info = lock.second;
-    const auto key_hexstr = rdb_hexdump(key_lock_info.key.c_str(),
-                                        key_lock_info.key.length(), FN_REFLEN);
+    const auto key_hexstr =
+        rdb_hexdump(key_lock_info.key.data(), key_lock_info.key.length());
 
     for (const auto &id : key_lock_info.ids) {
       tables->table->field[RDB_LOCKS_FIELD::COLUMN_FAMILY_ID]->store(cf_id,
@@ -2293,10 +2320,10 @@ static int rdb_i_s_trx_info_fill_table(
   const std::vector<Rdb_trx_info> &all_trx_info = rdb_get_all_trx_info();
 
   for (const auto &info : all_trx_info) {
-    auto name_hexstr =
-        rdb_hexdump(info.name.c_str(), info.name.length(), NAME_LEN);
-    auto key_hexstr = rdb_hexdump(info.waiting_key.c_str(),
-                                  info.waiting_key.length(), FN_REFLEN);
+    const auto name_hexstr =
+        rdb_hexdump(info.name.data(), info.name.length(), NAME_LEN);
+    const auto key_hexstr =
+        rdb_hexdump(info.waiting_key.data(), info.waiting_key.length());
 
     tables->table->field[RDB_TRX_FIELD::TRANSACTION_ID]->store(info.trx_id,
                                                                true);

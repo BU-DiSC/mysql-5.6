@@ -15,6 +15,7 @@
    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA */
 
 #include <openssl/ssl.h>
+#include <cassert>
 #include "rdb_global.h"
 #ifdef USE_PRAGMA_IMPLEMENTATION
 #pragma implementation  // gcc: Class implementation
@@ -27,7 +28,9 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#ifndef NDEBUG
 #include <limits>
+#endif
 #include <map>
 #include <set>
 #include <string>
@@ -39,21 +42,19 @@
 #include "./my_bit.h"
 #include "./my_bitmap.h"
 #include "./my_byteorder.h"
-#include "my_compare.h"  // get_rec_bits
-#include "my_dir.h"
-#include "myisampack.h"  // mi_int2store
+#include "my_checksum.h"
 #include "mysql/thread_pool_priv.h"
 #include "sql/dd/cache/dictionary_client.h"  // dd::cache::Dictionary_client
 #include "sql/field.h"
 #include "sql/key.h"
+#include "sql/mysqld.h"
+#include "sql/sql_class.h"
 #include "sql/sql_table.h"
 
 /* MyRocks header files */
 #include "./ha_rocksdb.h"
 #include "./ha_rocksdb_proto.h"
-#include "./my_stacktrace.h"
 #include "./rdb_cf_manager.h"
-#include "./rdb_psi.h"
 #include "./rdb_utils.h"
 
 extern CHARSET_INFO my_charset_utf16_bin;
@@ -357,7 +358,8 @@ Rdb_key_def::~Rdb_key_def() {
   m_pack_info = nullptr;
 }
 
-uint Rdb_key_def::setup(const TABLE &tbl, const Rdb_tbl_def &tbl_def) {
+uint Rdb_key_def::setup(const TABLE &tbl, const Rdb_tbl_def &tbl_def,
+                        Rdb_cmd_srv_helper &cmd_srv_helper) {
   /*
     Set max_length based on the table.  This can be called concurrently from
     multiple threads, so there is a mutex to protect this code.
@@ -383,8 +385,12 @@ uint Rdb_key_def::setup(const TABLE &tbl, const Rdb_tbl_def &tbl_def) {
       m_name = HIDDEN_PK_NAME;
     }
 
+    m_is_unique_sk = false;
+    m_user_defined_sk_parts = 0;
     if (secondary_key) {
       m_pk_key_parts = hidden_pk_exists ? 1 : pk_info->actual_key_parts;
+      m_is_unique_sk = key_info->flags & HA_NOSAME;
+      m_user_defined_sk_parts = key_info->user_defined_key_parts;
     } else {
       pk_info = nullptr;
       m_pk_key_parts = 0;
@@ -559,8 +565,9 @@ uint Rdb_key_def::setup(const TABLE &tbl, const Rdb_tbl_def &tbl_def) {
     rocksdb::Options opt = rdb_get_rocksdb_db()->GetOptions(get_cf());
     m_prefix_extractor = opt.prefix_extractor;
 
-    uint rtn = setup_vector_index(tbl, tbl_def);
+    uint rtn = setup_vector_index(tbl, tbl_def, cmd_srv_helper);
     if (rtn) {
+      RDB_MUTEX_UNLOCK_CHECK(m_mutex);
       return rtn;
     }
 
@@ -1006,14 +1013,12 @@ uint Rdb_key_def::get_primary_key_tuple(const Rdb_key_def &pk_descr,
     sk_buffer     OUT  Put here mem-comparable form of the Secondary Key.
     n_null_fields OUT  Put number of null fields contained within sk entry
 */
-uint Rdb_key_def::get_memcmp_sk_parts(const TABLE *table,
-                                      const rocksdb::Slice &key,
+uint Rdb_key_def::get_memcmp_sk_parts(const rocksdb::Slice &key,
                                       uchar *sk_buffer,
                                       uint *n_null_fields) const {
-  assert(table != nullptr);
   assert(sk_buffer != nullptr);
   assert(n_null_fields != nullptr);
-  assert(m_keyno != table->s->primary_key && !table_has_hidden_pk(*table));
+  assert(!is_primary_key());
 
   uchar *buf = sk_buffer;
 
@@ -1024,7 +1029,7 @@ uint Rdb_key_def::get_memcmp_sk_parts(const TABLE *table,
   // Skip the index number
   if ((!reader.read(INDEX_NUMBER_SIZE))) return RDB_INVALID_KEY_LEN;
 
-  for (uint i = 0; i < table->key_info[m_keyno].user_defined_key_parts; i++) {
+  for (uint i = 0; i < m_user_defined_sk_parts; i++) {
     if ((res = read_memcmp_key_part(&reader, i)) > 0) {
       return RDB_INVALID_KEY_LEN;
     } else if (res == -1) {
@@ -1762,7 +1767,7 @@ void Rdb_key_def::report_checksum_mismatch(const bool is_key,
                   "Checksum mismatch in %s of key-value pair for index 0x%x",
                   is_key ? "key" : "value", get_index_number());
 
-  const std::string buf = rdb_hexdump(data, data_size, RDB_MAX_HEXDUMP_LEN);
+  const auto buf = rdb_hexdump(data, data_size);
   // NO_LINT_DEBUG
   LogPluginErrMsg(ERROR_LEVEL, ER_LOG_PRINTF_MSG,
                   "Data with incorrect checksum (%" PRIu64 " bytes): %s",
@@ -3508,7 +3513,8 @@ Rdb_field_packing *Rdb_key_def::get_pack_info(uint pack_no) {
 }
 
 uint Rdb_key_def::setup_vector_index(const TABLE &tbl,
-                                     const Rdb_tbl_def &tbl_def) {
+                                     const Rdb_tbl_def &tbl_def,
+                                     Rdb_cmd_srv_helper &cmd_srv_helper) {
   if (m_vector_index_config.type() == FB_VECTOR_INDEX_TYPE::NONE) {
     return HA_EXIT_SUCCESS;
   }
@@ -3529,6 +3535,12 @@ uint Rdb_key_def::setup_vector_index(const TABLE &tbl,
     assert(false);
     return HA_ERR_UNSUPPORTED;
   }
+  // do not support ttl or any other index flags for now
+  if (m_index_flags_bitmap != 0) {
+    LogPluginErrMsg(INFORMATION_LEVEL, ER_LOG_PRINTF_MSG,
+                    "vector index is not supported on ttl tables");
+    return HA_ERR_UNSUPPORTED;
+  }
   KEY *key_info = &tbl.key_info[m_keyno];
   if (key_info->actual_key_parts != 1) {
     LogPluginErrMsg(ERROR_LEVEL, ER_LOG_PRINTF_MSG,
@@ -3542,8 +3554,10 @@ uint Rdb_key_def::setup_vector_index(const TABLE &tbl,
     assert(false);
     return HA_ERR_UNSUPPORTED;
   }
-  m_vector_index = std::make_unique<Rdb_vector_index>(m_vector_index_config);
-  return HA_EXIT_SUCCESS;
+
+  return create_vector_index(cmd_srv_helper, tbl_def.base_dbname(),
+                             m_vector_index_config, m_cf_handle, m_index_number,
+                             m_vector_index);
 }
 
 // See Rdb_charset_space_info::spaces_xfrm

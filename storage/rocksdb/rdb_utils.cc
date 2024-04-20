@@ -21,6 +21,7 @@
 #include <array>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 /* C standard header files */
@@ -30,6 +31,7 @@
 #include "m_ctype.h"
 #include "my_dir.h"
 #include "mysys_err.h"
+#include "sql/mysqld.h"
 
 /* MyRocks header files */
 #include "./ha_rocksdb.h"
@@ -218,17 +220,18 @@ const std::vector<std::string> parse_into_tokens(const std::string &s,
   return tokens;
 }
 
-static const std::size_t rdb_hex_bytes_per_char = 2;
-static const std::array<char, 16> rdb_hexdigit = {{'0', '1', '2', '3', '4', '5',
-                                                   '6', '7', '8', '9', 'a', 'b',
-                                                   'c', 'd', 'e', 'f'}};
+constexpr std::size_t rdb_hex_bytes_per_char = 2;
+constexpr std::array<char, 16> rdb_hexdigit = {{'0', '1', '2', '3', '4', '5',
+                                                '6', '7', '8', '9', 'a', 'b',
+                                                'c', 'd', 'e', 'f'}};
 
 /*
-  Convert data into a hex string with optional maximum length.
-  If the data is larger than the maximum length trancate it and append "..".
+  Convert data into a hex string. If the data is larger than the maximum length
+  trancate it and append "..". If maxsize is zero, the output length is
+  unlimited.
 */
-std::string rdb_hexdump(const char *data, const std::size_t data_len,
-                        const std::size_t maxsize) {
+std::string rdb_hexdump(const char *data, std::size_t data_len,
+                        std::size_t maxsize) {
   // Count the elements in the string
   std::size_t elems = data_len;
   // Calculate the amount of output needed
@@ -261,7 +264,7 @@ std::string rdb_hexdump(const char *data, const std::size_t data_len,
 }
 
 // Return dir + '/' + file
-std::string rdb_concat_paths(const std::string &dir, const std::string &file) {
+std::string rdb_concat_paths(std::string_view dir, std::string_view file) {
   std::string result;
   result.reserve(dir.length() + file.length() + 2);
   result = dir;
@@ -273,7 +276,7 @@ std::string rdb_concat_paths(const std::string &dir, const std::string &file) {
 /*
   Attempt to access the database subdirectory to see if it exists
 */
-bool rdb_database_exists(const std::string &db_name) {
+bool rdb_database_exists(std::string_view db_name) {
   const auto dir = rdb_concat_paths(mysql_real_data_home, db_name);
   struct MY_DIR *const dir_info =
       my_dir(dir.c_str(), MYF(MY_DONT_SORT | MY_WANT_STAT));
@@ -443,8 +446,10 @@ void rdb_path_rename_or_abort(const std::string &source,
       rdb_mkdir_or_abort(dest, stat_info.st_mode);
       myrocks::for_each_in_dir(
           source, MY_FAE, [&source, &dest](const fileinfo &f_info) {
-            const auto old_file = rdb_concat_paths(source, f_info.name);
-            const auto new_file = rdb_concat_paths(dest, f_info.name);
+            const auto fn = std::string_view{f_info.name};
+
+            const auto old_file = rdb_concat_paths(source, fn);
+            const auto new_file = rdb_concat_paths(dest, fn);
             rdb_file_copy_and_delete_or_abort(old_file, new_file);
             return true;
           });

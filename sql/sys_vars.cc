@@ -9376,6 +9376,25 @@ static Sys_var_bool Sys_commit_on_commit_error(
     "Whether to allow committing when there is a THD commit error",
     GLOBAL_VAR(opt_commit_on_commit_error), CMD_LINE(OPT_ARG), DEFAULT(false));
 
+static Sys_var_ulonglong Sys_opt_max_binlog_cache_overhead_size(
+    "max_binlog_cache_overhead_size",
+    "Max additional overhead in bytes needed for extra log events "
+    "(ie. gtid and metadata) added within ordered_commit().",
+    GLOBAL_VAR(opt_max_binlog_cache_overhead_size), CMD_LINE(OPT_ARG),
+    VALID_RANGE(0, ULLONG_MAX), DEFAULT(1000), BLOCK_SIZE(1));
+
+static Sys_var_bool Sys_set_write_error_on_cache_error(
+    "set_write_error_on_cache_error",
+    "Whether to mark binlog with a write error when we hit a cache write error",
+    GLOBAL_VAR(opt_set_write_error_on_cache_error), CMD_LINE(OPT_ARG),
+    DEFAULT(false));
+
+static Sys_var_bool Sys_strict_enforce_binlog_cache_size(
+    "strict_enforce_binlog_cache_size",
+    "Whether to strictly enforce max binlog cache size",
+    GLOBAL_VAR(opt_strict_enforce_binlog_cache_size), CMD_LINE(OPT_ARG),
+    DEFAULT(true));
+
 #ifndef __APPLE__
 
 static bool update_session_dscp_on_socket(sys_var *, THD *thd,
@@ -9584,8 +9603,15 @@ static bool update_write_throttling_patterns(sys_var *, THD *, enum_var_type) {
 
   if (strcmp(latest_write_throttling_rule, "OFF") == 0) {
     free_global_write_throttling_rules();
+
+    mysql_mutex_lock(&LOCK_global_write_throttling_rules);
     currently_throttled_entities.clear();
+    mysql_mutex_unlock(&LOCK_global_write_throttling_rules);
+
+    mysql_mutex_lock(&LOCK_replication_lag_auto_throttling);
     currently_monitored_entity.reset();
+    mysql_mutex_unlock(&LOCK_replication_lag_auto_throttling);
+
     return false;  // success
   }
   return store_write_throttling_rules();
@@ -9699,8 +9725,14 @@ static Sys_var_uint Sys_write_throttle_lag_pct_min_secondaries(
 static bool update_write_auto_throttle_frequency(sys_var *, THD *,
                                                  enum_var_type) {
   if (write_auto_throttle_frequency == 0) {
+    mysql_mutex_lock(&LOCK_global_write_throttling_rules);
     currently_throttled_entities.clear();
+    mysql_mutex_unlock(&LOCK_global_write_throttling_rules);
+
+    mysql_mutex_lock(&LOCK_replication_lag_auto_throttling);
     currently_monitored_entity.reset();
+    mysql_mutex_unlock(&LOCK_replication_lag_auto_throttling);
+
     free_global_write_auto_throttling_rules();
   }
   return false;  // success
@@ -9916,6 +9948,16 @@ static Sys_var_long Sys_thread_priority(
     SESSION_VAR(thread_priority), CMD_LINE(REQUIRED_ARG), VALID_RANGE(-20, 19),
     DEFAULT(0), BLOCK_SIZE(1), NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(NULL),
     ON_UPDATE(update_thread_priority));
+
+static Sys_var_long Sys_replica_sql_thread_os_priority(
+    "replica_sql_thread_os_priority",
+    "Set OS priority for replication SQL threads. "
+    "This is a global variable. New SQL threads pick the value after changing "
+    "it. "
+    "The values are in the range -20 to 19, similar to nice.",
+    GLOBAL_VAR(replica_sql_thread_os_priority), CMD_LINE(OPT_ARG),
+    VALID_RANGE(-20, 19), DEFAULT(0), BLOCK_SIZE(1), NO_MUTEX_GUARD,
+    NOT_IN_BINLOG, ON_CHECK(nullptr), ON_UPDATE(nullptr));
 
 /*
 ** sql_maximum_duplicate_executions
@@ -10378,3 +10420,47 @@ static Sys_var_uint Sys_fb_vector_max_dimension(
     SESSION_VAR(fb_vector_max_dimension), CMD_LINE(OPT_ARG),
     VALID_RANGE(1, 1024 * 1024), DEFAULT(4 * 1024), BLOCK_SIZE(1),
     NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(nullptr), ON_UPDATE(nullptr));
+
+static Sys_var_bool Sys_skip_sys_tables_engine_check(
+    "skip_sys_tables_engine_check",
+    "skip System Tables storage engine check. If True, System Tables can use "
+    "any supported storage engines; If False, System Tables can only use "
+    "default_dd_system_storage_engine",
+    GLOBAL_VAR(skip_sys_tables_engine_check), CMD_LINE(OPT_ARG),
+    DEFAULT(false));
+
+static Sys_var_uint Sys_fb_vector_search_nprobe(
+    "fb_vector_search_nprobe",
+    "This parameter controls the vector search radius for a query "
+    "vector when doing nearest neighbour search or similarity search. "
+    "The nprobe value corresponds to the number of closest centroids "
+    "that become part of the vector search space. Only vectors in the "
+    "nprobe-closest voronoi cells or partitions are searched. "
+    "This session default can be superceded by a query level "
+    "nprobe value using a query hint like this: "
+    "'SELECT /*+ SET_VAR(fb_vector_search_nprobe = 3) */ ... '. Default: 16",
+    HINT_UPDATEABLE SESSION_VAR(fb_vector_search_nprobe), CMD_LINE(OPT_ARG),
+    VALID_RANGE(1, 10000), DEFAULT(16), BLOCK_SIZE(1));
+
+static Sys_var_uint Sys_fb_vector_index_cost_factor(
+    "fb_vector_index_cost_factor",
+    "A table scan plus filesort will be prohibitively expensive "
+    "for vector searches. This sysvar parameterizes the preference for "
+    "the vector index, reduces the vector index cost by this factor, thereby "
+    "making the optimizer prefer the vector index for vector search. "
+    "Default: 1000",
+    SESSION_VAR(fb_vector_index_cost_factor), CMD_LINE(OPT_ARG),
+    VALID_RANGE(1, 100000), DEFAULT(1000), BLOCK_SIZE(1),
+    NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(nullptr), ON_UPDATE(nullptr));
+
+static Sys_var_uint Sys_fb_vector_search_limit_multiplier(
+    "fb_vector_search_limit_multiplier",
+    "This parameter indicates to the storage engine the filtering effect "
+    "of a SQL query due to WHERE and HAVING clauses. This is used to "
+    "fetch more nearest neighbours from FAISS so that the LIMIT can still "
+    "be satisfied. This applies to all vector index types."
+    "This session default can be superceded by a query level override: "
+    "'SELECT /*+ SET_VAR(fb_vector_search_limit_multiplier = 3) */ ... '. "
+    "Default: 10",
+    HINT_UPDATEABLE SESSION_VAR(fb_vector_search_limit_multiplier), CMD_LINE(OPT_ARG),
+    VALID_RANGE(1, 1000), DEFAULT(10), BLOCK_SIZE(1));

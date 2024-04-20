@@ -504,6 +504,16 @@ extern bool opt_commit_consensus_error_rollback_clear_logpos;
    ordered commit */
 extern bool opt_commit_on_commit_error;
 
+/* Max additional overhead in bytes needed for extra log events
+   (ie. gtid and metadata) added within ordered_commit(). */
+extern ulonglong opt_max_binlog_cache_overhead_size;
+
+/* Whether to set write error on cache write errors */
+extern bool opt_set_write_error_on_cache_error;
+
+/* Whether to strictly enforce binlog cache size */
+extern bool opt_strict_enforce_binlog_cache_size;
+
 /* Failure injection related variables */
 extern bool enable_failure_injection;
 extern char *failure_injection_points;
@@ -522,6 +532,7 @@ extern long lz4f_net_compression_level;
 extern bool enable_blind_replace;
 extern bool set_read_only_on_shutdown;
 extern bool show_binlogs_encryption;
+extern long replica_sql_thread_os_priority;
 
 /* SHOW STATS var: Name of current timer */
 extern const char *timer_in_use;
@@ -774,6 +785,8 @@ extern thread_local MEM_ROOT **THR_MALLOC;
 
 extern PSI_file_key key_file_binlog_cache;
 extern PSI_file_key key_file_binlog_index_cache;
+
+extern bool skip_sys_tables_engine_check;
 
 #ifdef HAVE_PSI_INTERFACE
 

@@ -21,6 +21,7 @@
 #include "sql/dd/types/table.h"  // dd::Table
 
 /* MyRocks header files */
+#include "sql/mysqld.h"
 #include "sql/plugin_table.h"
 #include "storage/rocksdb/ha_rocksdb_proto.h"
 #include "storage/rocksdb/rdb_datadic.h"
@@ -68,12 +69,6 @@ bool rocksdb_dict_set_server_version() {
   return rdb_get_dict_manager()
       ->get_dict_manager_selector_non_const(false /*is_tmp_table*/)
       ->set_server_version();
-}
-
-bool rocksdb_is_supported_system_table(const char *db_name,
-                                       const char *tbl_name, bool) {
-  return strcmp(db_name, "mysql") == 0 &&
-         (strcmp(tbl_name, "db") == 0 || strcmp(tbl_name, "user") == 0);
 }
 
 bool rocksdb_ddse_dict_init(

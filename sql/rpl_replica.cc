@@ -2430,8 +2430,11 @@ static int terminate_slave_thread(THD *thd, mysql_mutex_t *term_lock,
       ESRCH: thread already killed (can happen, should be ignored)
     */
 #ifndef _WIN32
-    int err [[maybe_unused]] = pthread_kill(thd->real_id, SIGALRM);
-    assert(err != EINVAL);
+    auto real_id = thd->real_id;
+    if (real_id != 0) {
+      int err [[maybe_unused]] = pthread_kill(real_id, SIGALRM);
+      assert(err != EINVAL);
+    }
 #endif
     if (force)
       thd->awake(THD::KILL_CONNECTION);
@@ -6608,6 +6611,7 @@ static void *handle_slave_worker(void *arg) {
     w->deferred_events = new Deferred_log_events();
   assert(thd->rli_slave->info_thd == thd);
 
+  thd->set_thread_priority(replica_sql_thread_os_priority);
   /* Set applier thread InnoDB priority */
   set_thd_tx_priority(thd, rli->get_thd_tx_priority());
   /* Set write set related options */
@@ -7635,6 +7639,7 @@ extern "C" void *handle_slave_sql(void *arg) {
 #endif
     mysql_thread_set_psi_id(thd->thread_id());
     mysql_thread_set_psi_THD(thd);
+    thd->set_thread_priority(replica_sql_thread_os_priority);
 
     if (rli->channel_mts_submode == MTS_PARALLEL_TYPE_LOGICAL_CLOCK)
       rli->current_mts_submode = new Mts_submode_logical_clock();

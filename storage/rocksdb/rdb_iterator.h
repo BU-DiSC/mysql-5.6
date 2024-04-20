@@ -16,8 +16,6 @@
 
 #pragma once
 
-#include <map>
-
 // MySQL header files
 #include "sql/debug_sync.h"
 #include "sql/handler.h"
@@ -29,6 +27,11 @@
 #include "./rdb_datadic.h"
 
 namespace myrocks {
+
+// If the iterator is not valid it might be because of EOF but might be due
+// to IOError or corruption. The good practice is always check it.
+// https://github.com/facebook/rocksdb/wiki/Iterator#error-handling
+[[nodiscard]] bool is_valid_rdb_iterator(const rocksdb::Iterator &it);
 
 class Rdb_iterator {
  public:
@@ -64,6 +67,9 @@ class Rdb_iterator {
   virtual int get(const rocksdb::Slice *key, rocksdb::PinnableSlice *value,
                   Rdb_lock_type type, bool skip_ttl_check = false,
                   bool skip_wait = false) = 0;
+  virtual void multi_get(const std::vector<rocksdb::Slice> &key_slices,
+                         std::vector<rocksdb::PinnableSlice> &value_slices,
+                         std::vector<int> &rtn_codes, bool sorted_input) = 0;
   virtual int next() = 0;
   virtual int prev() = 0;
   virtual rocksdb::Slice key() = 0;
@@ -85,11 +91,15 @@ class Rdb_iterator_base : public Rdb_iterator {
                        const int bytes_changed_by_succ,
                        const rocksdb::Slice &end_key);
   int next_with_direction(bool move_forward, bool skip_next);
+  [[nodiscard]] int convert_get_status(myrocks::Rdb_transaction &tx,
+                                       const rocksdb::Status &status,
+                                       rocksdb::PinnableSlice *value,
+                                       bool skip_ttl_check) const;
+  [[nodiscard]] int convert_iterator_status() const;
 
  public:
   Rdb_iterator_base(THD *thd, ha_rocksdb *rocksdb_handler,
-                    const std::shared_ptr<Rdb_key_def> kd,
-                    const std::shared_ptr<Rdb_key_def> pkd,
+                    const Rdb_key_def &kd, const Rdb_key_def &pkd,
                     const Rdb_tbl_def *tbl_def);
 
   ~Rdb_iterator_base() override;
@@ -100,6 +110,9 @@ class Rdb_iterator_base : public Rdb_iterator {
   int get(const rocksdb::Slice *key, rocksdb::PinnableSlice *value,
           Rdb_lock_type type, bool skip_ttl_check = false,
           bool skip_wait = false) override;
+  void multi_get(const std::vector<rocksdb::Slice> &key_slices,
+                 std::vector<rocksdb::PinnableSlice> &value_slices,
+                 std::vector<int> &rtn_codes, bool sorted_input) override;
 
   int next() override { return next_with_direction(true, false); }
 
@@ -123,10 +136,10 @@ class Rdb_iterator_base : public Rdb_iterator {
   void setup_prefix_buffer(enum ha_rkey_function find_flag,
                            const rocksdb::Slice start_key);
 
-  const std::shared_ptr<Rdb_key_def> m_kd;
+  const Rdb_key_def &m_kd;
 
   // Rdb_key_def of the primary key
-  const std::shared_ptr<Rdb_key_def> m_pkd;
+  const Rdb_key_def &m_pkd;
 
   const Rdb_tbl_def *m_tbl_def;
 
@@ -154,6 +167,11 @@ class Rdb_iterator_base : public Rdb_iterator {
   bool m_valid;
   bool m_check_iterate_bounds;
   bool m_ignore_killed;
+
+  Rdb_iterator_base(const Rdb_iterator_base &) = delete;
+  Rdb_iterator_base(Rdb_iterator_base &&) = delete;
+  Rdb_iterator_base &operator=(const Rdb_iterator_base &) = delete;
+  Rdb_iterator_base &operator=(Rdb_iterator_base &&) = delete;
 };
 
 class Rdb_iterator_partial : public Rdb_iterator_base {
@@ -198,6 +216,9 @@ class Rdb_iterator_partial : public Rdb_iterator_base {
   int read_prefix_from_pk();
   int next_with_direction_in_group(bool direction);
   int next_with_direction(bool direction);
+  int handle_get_result(int rtn_code, const rocksdb::Slice *key,
+                        rocksdb::PinnableSlice *value, Rdb_lock_type type,
+                        bool skip_ttl_check, bool skip_wait);
 
   using Slice_pair = std::pair<rocksdb::Slice, rocksdb::Slice>;
   using Records = std::vector<Slice_pair>;
@@ -222,8 +243,7 @@ class Rdb_iterator_partial : public Rdb_iterator_base {
   slice_comparator m_comparator;
 
  public:
-  Rdb_iterator_partial(THD *thd, const std::shared_ptr<Rdb_key_def> kd,
-                       const std::shared_ptr<Rdb_key_def> pkd,
+  Rdb_iterator_partial(THD *thd, const Rdb_key_def &kd, const Rdb_key_def &pkd,
                        const Rdb_tbl_def *tbl_def, TABLE *table,
                        const dd::Table *dd_table);
   ~Rdb_iterator_partial() override;
@@ -234,6 +254,9 @@ class Rdb_iterator_partial : public Rdb_iterator_base {
   int get(const rocksdb::Slice *key, rocksdb::PinnableSlice *value,
           Rdb_lock_type type, bool skip_ttl_check = false,
           bool skip_wait = false) override;
+  void multi_get(const std::vector<rocksdb::Slice> &key_slices,
+                 std::vector<rocksdb::PinnableSlice> &value_slices,
+                 std::vector<int> &rtn_codes, bool sorted_input) override;
   int next() override;
   int prev() override;
   rocksdb::Slice key() override;
@@ -244,6 +267,11 @@ class Rdb_iterator_partial : public Rdb_iterator_base {
     assert(false);
     return false;
   }
+
+  Rdb_iterator_partial(const Rdb_iterator_partial &) = delete;
+  Rdb_iterator_partial(Rdb_iterator_partial &&) = delete;
+  Rdb_iterator_partial &operator=(const Rdb_iterator_partial &) = delete;
+  Rdb_iterator_partial &operator=(Rdb_iterator_partial &&) = delete;
 };
 
 }  // namespace myrocks

@@ -1254,6 +1254,9 @@ std::atomic<ulonglong> tmp_table_disk_usage_period_peak{0};
 ulong opt_commit_consensus_error_action = 0;
 bool opt_commit_consensus_error_rollback_clear_logpos = 0;
 bool opt_commit_on_commit_error = 0;
+ulonglong opt_max_binlog_cache_overhead_size = 1000;
+bool opt_set_write_error_on_cache_error = 0;
+bool opt_strict_enforce_binlog_cache_size = 1;
 bool enable_raft_plugin = 0;
 bool disallow_raft = 1;  // raft is not allowed by default
 bool override_enable_raft_check = false;
@@ -1349,6 +1352,7 @@ long lz4f_net_compression_level = 0;
 extern ulonglong compress_ctx_reset;
 extern ulonglong compress_input_bytes;
 extern ulonglong compress_output_bytes;
+long replica_sql_thread_os_priority = 0;
 uint default_password_lifetime = 0;
 bool password_require_current = false;
 std::atomic<bool> partial_revokes;
@@ -1574,7 +1578,7 @@ bool opt_group_replication_plugin_hooks = false;
 bool opt_core_file = false;
 bool skip_core_dump_on_error = false;
 bool show_query_digest = false;
-
+bool skip_sys_tables_engine_check = false;
 /* write_control_level:
  * Global variable to control write throttling for short running writes
  */
@@ -7178,6 +7182,7 @@ static int init_server_components() {
   wait_end_hook = thd_wait_end_check;
 
   // Validate that mysys wait constants are as they should be.
+  static_assert(MY_THD_WAIT_NET_IO == THD_WAIT_NET_IO);
   static_assert(MY_THD_WAIT_WS_IO == THD_WAIT_WS_IO);
 
   xa::Transaction_cache::initialize();

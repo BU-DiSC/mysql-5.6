@@ -139,6 +139,7 @@ SET PERSIST_ONLY master_verify_checksum = @@GLOBAL.master_verify_checksum;
 Warnings:
 Warning	1287	'@@master_verify_checksum' is deprecated and will be removed in a future release. Please use source_verify_checksum instead.
 Warning	1287	'@@master_verify_checksum' is deprecated and will be removed in a future release. Please use source_verify_checksum instead.
+SET PERSIST_ONLY max_binlog_cache_overhead_size = @@GLOBAL.max_binlog_cache_overhead_size;
 SET PERSIST_ONLY max_binlog_cache_size = @@GLOBAL.max_binlog_cache_size;
 SET PERSIST_ONLY max_binlog_size = @@GLOBAL.max_binlog_size;
 SET PERSIST_ONLY max_binlog_stmt_cache_size = @@GLOBAL.max_binlog_stmt_cache_size;
@@ -180,6 +181,7 @@ SET PERSIST_ONLY replica_parallel_workers = @@GLOBAL.replica_parallel_workers;
 SET PERSIST_ONLY replica_pending_jobs_size_max = @@GLOBAL.replica_pending_jobs_size_max;
 SET PERSIST_ONLY replica_preserve_commit_order = @@GLOBAL.replica_preserve_commit_order;
 SET PERSIST_ONLY replica_skip_errors = @@GLOBAL.replica_skip_errors;
+SET PERSIST_ONLY replica_sql_thread_os_priority = @@GLOBAL.replica_sql_thread_os_priority;
 SET PERSIST_ONLY replica_sql_verify_checksum = @@GLOBAL.replica_sql_verify_checksum;
 SET PERSIST_ONLY replica_transaction_retries = @@GLOBAL.replica_transaction_retries;
 SET PERSIST_ONLY replica_type_conversions = @@GLOBAL.replica_type_conversions;
@@ -298,6 +300,7 @@ SET PERSIST_ONLY sql_slave_skip_counter = @@GLOBAL.sql_slave_skip_counter;
 Warnings:
 Warning	1287	'@@sql_slave_skip_counter' is deprecated and will be removed in a future release. Please use sql_replica_skip_counter instead.
 Warning	1287	'@@sql_slave_skip_counter' is deprecated and will be removed in a future release. Please use sql_replica_skip_counter instead.
+SET PERSIST_ONLY strict_enforce_binlog_cache_size = @@GLOBAL.strict_enforce_binlog_cache_size;
 SET PERSIST_ONLY sync_binlog = @@GLOBAL.sync_binlog;
 SET PERSIST_ONLY sync_master_info = @@GLOBAL.sync_master_info;
 Warnings:
@@ -381,6 +384,7 @@ RESET PERSIST log_replica_updates;
 RESET PERSIST log_slow_replica_statements;
 RESET PERSIST log_statements_unsafe_for_binlog;
 RESET PERSIST master_info_repository;
+RESET PERSIST max_binlog_cache_overhead_size;
 RESET PERSIST max_binlog_cache_size;
 RESET PERSIST max_binlog_size;
 RESET PERSIST max_binlog_stmt_cache_size;
@@ -416,6 +420,7 @@ RESET PERSIST replica_parallel_workers;
 RESET PERSIST replica_pending_jobs_size_max;
 RESET PERSIST replica_preserve_commit_order;
 RESET PERSIST replica_skip_errors;
+RESET PERSIST replica_sql_thread_os_priority;
 RESET PERSIST replica_sql_verify_checksum;
 RESET PERSIST replica_transaction_retries;
 RESET PERSIST replica_type_conversions;
@@ -457,6 +462,7 @@ RESET PERSIST slave_use_idempotent_for_recovery;
 RESET PERSIST source_verify_checksum;
 RESET PERSIST sql_log_bin_triggers;
 RESET PERSIST sql_replica_skip_counter;
+RESET PERSIST strict_enforce_binlog_cache_size;
 RESET PERSIST sync_binlog;
 RESET PERSIST sync_relay_log;
 RESET PERSIST sync_relay_log_info;

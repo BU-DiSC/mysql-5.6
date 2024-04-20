@@ -2032,7 +2032,11 @@ bool MYSQL_BIN_LOG::write_transaction(THD *thd, binlog_cache_data *cache_data,
     }
     if (unlikely(!raft_trx_cache)) {
       raft_trx_cache = std::make_unique<Binlog_cache_storage>();
-      ret = raft_trx_cache->open(binlog_cache_size, max_binlog_cache_size);
+      // We add a little slack to max size to account for additional
+      // log events (ie. gtid and metadata)
+      ret = raft_trx_cache->open(binlog_cache_size,
+                                 max_binlog_cache_size +
+                                 opt_max_binlog_cache_overhead_size);
       if (ret) {
         raft_trx_cache.reset();
         goto end;
@@ -3172,8 +3176,10 @@ bool HybridLogicalClock::DatabaseEntry::wait_for_hlc(THD *thd,
     if (sleeping) {
       const char *save_proc_info =
           thd_proc_info(thd, "Waiting for database applied HLC");
+      thd_wait_begin(thd, THD_WAIT_FOR_HLC);
       std::this_thread::sleep_for(
           std::chrono::milliseconds{remaining_timeout_ms});
+      thd_wait_end(thd);
       thd_proc_info(thd, save_proc_info);
     } else {
       struct timespec timeout;
@@ -4195,7 +4201,7 @@ bool update_relay_log_cordinates(Relay_log_info *rli) {
   @retval false success
   @retval true failure
 */
-bool show_raft_logs(THD *thd) {
+bool show_raft_logs(THD *thd, bool with_gtid) {
   uint length;
   char file_name_and_gtid_set_length[FN_REFLEN + 22];
   File file;
@@ -4204,7 +4210,7 @@ bool show_raft_logs(THD *thd) {
   const char *errmsg = 0;
 
   // Redirect to show_binlog() on leader instances
-  if (!mysql_bin_log.is_apply_log) return show_binlogs(thd);
+  if (!mysql_bin_log.is_apply_log) return show_binlogs(thd, with_gtid);
 
   Master_info *active_mi;
   if (!get_and_lock_master_info(&active_mi)) {
@@ -4229,6 +4235,10 @@ bool show_raft_logs(THD *thd) {
   field_list.push_back(new Item_empty_string("Log_name", 255));
   field_list.push_back(
       new Item_return_int("File_size", 20, MYSQL_TYPE_LONGLONG));
+  if (with_gtid)
+    field_list.push_back(
+        new Item_empty_string("Prev_gtid_set",
+                              0));  // max_size seems not to matter
 
   int error = 0;
   if (thd->send_result_metadata(field_list,
@@ -4276,6 +4286,26 @@ bool show_raft_logs(THD *thd) {
       }
     }
     protocol->store(file_length);
+
+    if (with_gtid) {
+      const auto previous_gtid_set_map =
+          rli->relay_log.get_previous_gtid_set_map();
+      Sid_map sid_map(nullptr);
+      Gtid_set gtid_set(&sid_map, nullptr);
+      const auto gtid_str_it = previous_gtid_set_map->find(fname);
+      if (gtid_str_it != previous_gtid_set_map->end() &&
+          !gtid_str_it->second.empty()) {  // if GTID enabled
+        gtid_set.add_gtid_encoding((const uchar *)gtid_str_it->second.c_str(),
+                                   gtid_str_it->second.length(), nullptr);
+        char *buf;
+        gtid_set.to_string(&buf, false, &Gtid_set::commented_string_format);
+        protocol->store_string(buf, strlen(buf), &my_charset_bin);
+        my_free(buf);
+      } else {
+        protocol->store_string("", 0, &my_charset_bin);
+      }
+    }
+
     if (protocol->end_row()) {
       error = 1;
       errmsg = "Failure in protocol write";
@@ -7175,7 +7205,14 @@ bool MYSQL_BIN_LOG::check_write_error(const THD *thd) {
 void MYSQL_BIN_LOG::report_cache_write_error(THD *thd, bool is_transactional) {
   DBUG_TRACE;
 
-  write_error = true;
+  if (!enable_raft_plugin || opt_set_write_error_on_cache_error) {
+    // On cache write errors, if we decide to set write_error, we will no longer
+    // be able to write further to this binlog. Since the binlog cache is
+    // cleared on rollback anyway, permanently failing the binlog is not
+    // necessary. To be safe, we have enable_write_error_on_cache_error a flag
+    // to gate this behavior.
+    write_error = true;
+  }
 
   if (check_write_error(thd)) return;
 

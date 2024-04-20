@@ -18,12 +18,13 @@
 /* C++ standard header files */
 #include <chrono>
 #include <string>
+#include <string_view>
 #include <vector>
 
 /* MySQL header files */
 #include "./my_stacktrace.h"
 #include "./sql_string.h"
-#include "sql/mysqld.h"
+#include "my_compiler.h"
 #define LOG_COMPONENT_TAG "rocksdb"
 #include "mysql/components/services/log_builtins.h"
 #include "mysqld_error.h"
@@ -149,10 +150,9 @@ namespace myrocks {
   rdb_check_mutex_call_result(__PRETTY_FUNCTION__, false, \
                               mysql_mutex_unlock(&m))
 
-/*
-  Generic constant.
-*/
-const size_t RDB_MAX_HEXDUMP_LEN = 1000;
+// The default limit for rdb_hexdump output length, happens to fit the longest
+// possible keys (16K)
+constexpr size_t RDB_MAX_HEXDUMP_LEN = 2 * 16 * 1024;
 
 /*
   Helper function to get an NULL terminated uchar* out of a given MySQL String.
@@ -277,6 +277,7 @@ bool rdb_has_rocksdb_corruption();
 
 // stores a marker file in the data directory so that after restart server
 // is still aware that rocksdb data is corrupted
+MY_ATTRIBUTE((cold, noinline))
 void rdb_persist_corruption_marker();
 
 // Perform the given function on each directory entry. Supported flags are
@@ -340,19 +341,19 @@ const std::vector<std::string> parse_into_tokens(const std::string &s,
   Helper functions to populate strings.
 */
 
-std::string rdb_hexdump(const char *data, const std::size_t data_len,
-                        const std::size_t maxsize = 0)
-    MY_ATTRIBUTE((__nonnull__));
+[[nodiscard]] std::string rdb_hexdump(
+    const char *data, std::size_t data_len,
+    std::size_t maxsize = RDB_MAX_HEXDUMP_LEN);
 
 /*
   Helper function to return dir + '/' + file
  */
-std::string rdb_concat_paths(const std::string &dir, const std::string &file);
+std::string rdb_concat_paths(std::string_view dir, std::string_view file);
 
 /*
   Helper function to see if a database exists
  */
-bool rdb_database_exists(const std::string &db_name);
+bool rdb_database_exists(std::string_view db_name);
 
 /**
   Helper class wrappers to meansure startup time
@@ -462,8 +463,8 @@ class Ensure_initialized {
 };
 
 // extension must start with a dot.
-[[nodiscard]] inline bool has_file_extension(const std::string &fn,
-                                             const std::string &extension) {
+[[nodiscard]] inline bool has_file_extension(std::string_view fn,
+                                             std::string_view extension) {
   const auto ext_len = extension.length();
   assert(ext_len > 0);
   assert(extension[0] == '.');

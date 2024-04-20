@@ -22,40 +22,35 @@
 /* C++ standard header files */
 #include <deque>
 #include <map>
-#include <set>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
 /* MySQL header files */
-#include "my_checksum.h"
 #include "my_dbug.h"
 #include "my_icp.h" /* icp_result */
-#include "mysql/psi/mysql_rwlock.h"
 #include "sql/handler.h"    /* handler */
 #include "sql/sql_bitmap.h" /* Key_map */
 #include "sql/table.h"
 #include "sql_string.h"
 
 /* RocksDB header files */
-#include "rocksdb/cache.h"
 #include "rocksdb/merge_operator.h"
-#include "rocksdb/perf_context.h"
-#include "rocksdb/sst_file_manager.h"
-#include "rocksdb/statistics.h"
-#include "rocksdb/utilities/options_util.h"
-#include "rocksdb/utilities/transaction_db.h"
 #include "rocksdb/utilities/write_batch_with_index.h"
 
 /* MyRocks header files */
 #include "./rdb_buff.h"
 #include "./rdb_global.h"
 #include "./rdb_index_merge.h"
-#include "./rdb_io_watchdog.h"
 #include "./rdb_perf_context.h"
 #include "./rdb_sst_info.h"
 #include "./rdb_utils.h"
+
+#ifndef __APPLE__
+#include "./rdb_io_watchdog.h"
+#endif
 
 /**
   @note MyRocks Coding Conventions:
@@ -1268,22 +1263,18 @@ inline void rocksdb_smart_prev(bool seek_backward,
   }
 }
 
-// If the iterator is not valid it might be because of EOF but might be due
-// to IOError or corruption. The good practice is always check it.
-// https://github.com/facebook/rocksdb/wiki/Iterator#error-handling
-bool is_valid_iterator(rocksdb::Iterator *scan_it);
-
-bool rdb_should_hide_ttl_rec(const Rdb_key_def &kd,
-                             const rocksdb::Slice *const ttl_rec_val,
-                             Rdb_transaction *tx);
+[[nodiscard]] bool rdb_should_hide_ttl_rec(
+    const Rdb_key_def &kd, const rocksdb::Slice *const ttl_rec_val,
+    Rdb_transaction &tx);
 
 bool rdb_tx_started(Rdb_transaction *tx, const TABLE_TYPE table_type);
-int rdb_tx_set_status_error(Rdb_transaction *tx, const rocksdb::Status &s,
-                            const Rdb_key_def &kd,
-                            const Rdb_tbl_def *const tbl_def);
+[[nodiscard]] int rdb_tx_set_status_error(Rdb_transaction &tx,
+                                          const rocksdb::Status &s,
+                                          const Rdb_key_def &kd,
+                                          const Rdb_tbl_def *const tbl_def);
 
-int rocksdb_create_checkpoint(const char *checkpoint_dir_raw);
-int rocksdb_remove_checkpoint(const char *checkpoint_dir_raw);
+int rocksdb_create_checkpoint(std::string_view checkpoint_dir_raw);
+int rocksdb_remove_checkpoint(std::string_view checkpoint_dir_raw);
 
 extern std::atomic<uint64_t> rocksdb_select_bypass_executed;
 extern std::atomic<uint64_t> rocksdb_select_bypass_rejected;
@@ -1316,14 +1307,14 @@ extern uint rocksdb_clone_checkpoint_max_count;
 
 extern unsigned long long rocksdb_converter_record_cached_length;
 
-inline bool is_wal_dir_separate() noexcept {
+[[nodiscard]] inline bool is_wal_dir_separate() noexcept {
   return rocksdb_wal_dir && *rocksdb_wal_dir &&
-         // Prefer cheapness over accuracy by doing lexicographic
-         // path comparison only
+         // Prefer cheapness over accuracy by doing lexicographic path
+         // comparison only
          strcmp(rocksdb_wal_dir, rocksdb_datadir);
 }
 
-inline char *get_wal_dir() noexcept {
+[[nodiscard]] inline char *get_wal_dir() noexcept {
   return (rocksdb_wal_dir && *rocksdb_wal_dir) ? rocksdb_wal_dir
                                                : rocksdb_datadir;
 }
