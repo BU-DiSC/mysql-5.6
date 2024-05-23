@@ -5214,7 +5214,7 @@ class Rdb_transaction_impl : public Rdb_transaction {
                              const rocksdb::Slice &key, TABLE_TYPE table_type,
                              const bool assume_tracked, uint64_t dpt) override {
     assert(!is_ac_nl_ro_rc_transaction());
-
+    DBUG_PRINT("info", ("delete_key with DPT: %ld", dpt));
     ++m_write_count[table_type];
     return m_rocksdb_tx[table_type]->Delete(column_family, key, assume_tracked,
                                             dpt);
@@ -13738,7 +13738,7 @@ int ha_rocksdb::delete_row(const uchar *const buf) {
   uint64_t dpt = table_share->dml_dpt      ? table_share->dml_dpt
                  : table_share->create_dpt ? table_share->create_dpt
                                            : 0;
-  DBUG_PRINT("info", ("Deleting row with DPT: %ld", dpt));
+  DBUG_PRINT("info", ("delete_row with DPT: %ld", dpt));
 
   const uint index = pk_index(*table, *m_tbl_def);
   rocksdb::Status s =
