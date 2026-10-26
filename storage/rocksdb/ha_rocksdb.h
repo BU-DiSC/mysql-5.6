@@ -669,7 +669,14 @@ class ha_rocksdb : public my_core::handler, public blob_buffer {
 
   [[nodiscard]] rocksdb::Status delete_or_singledelete(
       uint index, Rdb_transaction *tx, rocksdb::ColumnFamilyHandle &cf,
-      const rocksdb::Slice &key, TABLE_TYPE table_type, uint64_t dpt = 0);
+      const rocksdb::Slice &key, TABLE_TYPE table_type);
+
+  /*
+    Makes the deletes written next to tx for this table carry its delete
+    persistence threshold: the smaller of the DELETE statement's WITH DPT and
+    the table's DPT, ignoring unset ones.
+  */
+  [[nodiscard]] int set_delete_dpt(Rdb_transaction *tx);
 
   int index_next(uchar *const buf) override
       MY_ATTRIBUTE((__warn_unused_result__));

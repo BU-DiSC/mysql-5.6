@@ -1,6 +1,11 @@
 --source include/have_debug.inc
 --source include/have_rocksdb.inc
 
+--disable_query_log
+# Range deletions fail with user defined timestamps.
+call mtr.add_suppression("Failed to write range deletions with a delete persistence threshold");
+--enable_query_log
+
 CREATE TABLE t1 (
   a int PRIMARY KEY
 ) ENGINE=rocksdb DPT=10;

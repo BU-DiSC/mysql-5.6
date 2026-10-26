@@ -1,0 +1,97 @@
+call mtr.add_suppression("Killed connection .*rocksdb_dpt_strict_snapshots");
+SELECT @@global.rocksdb_dpt_strict_snapshots;
+@@global.rocksdb_dpt_strict_snapshots
+1
+CREATE TABLE t1 (a INT PRIMARY KEY) ENGINE=rocksdb DPT=2;
+INSERT INTO t1 VALUES (1), (2), (3), (4);
+# An old snapshot with no DPT delete after it survives.
+START TRANSACTION WITH CONSISTENT SNAPSHOT;
+SELECT * FROM t1;
+a
+1
+2
+3
+4
+SELECT * FROM t1;
+a
+1
+2
+3
+4
+COMMIT;
+# Without the setting, an old snapshot with a DPT delete after it
+# survives.
+SET GLOBAL rocksdb_dpt_strict_snapshots = OFF;
+START TRANSACTION WITH CONSISTENT SNAPSHOT;
+SELECT * FROM t1;
+a
+1
+2
+3
+4
+DELETE FROM t1 WHERE a = 1;
+SELECT * FROM t1;
+a
+1
+2
+3
+4
+COMMIT;
+kills
+0
+# With the setting, the connection holding an old snapshot with a DPT
+# delete after it is killed.
+SET GLOBAL rocksdb_dpt_strict_snapshots = DEFAULT;
+START TRANSACTION WITH CONSISTENT SNAPSHOT;
+SELECT * FROM t1;
+a
+2
+3
+4
+DELETE FROM t1 WHERE a = 2;
+SELECT * FROM t1;
+Got one of the listed errors
+# A DELETE ... WITH DPT on a table without DPT counts too.
+CREATE TABLE t2 (a INT PRIMARY KEY) ENGINE=rocksdb;
+INSERT INTO t2 VALUES (1), (2);
+START TRANSACTION WITH CONSISTENT SNAPSHOT;
+SELECT * FROM t2;
+a
+1
+2
+DELETE FROM t2 WHERE a = 1 WITH DPT=2;
+SELECT * FROM t2;
+Got one of the listed errors
+# A connection without a snapshot is not killed.
+BEGIN;
+DELETE FROM t1 WHERE a = 3;
+SELECT * FROM t1;
+a
+4
+COMMIT;
+kills
+0
+CREATE TABLE t3 (a INT PRIMARY KEY) ENGINE=rocksdb DPT=2;
+INSERT INTO t3 VALUES (1), (2), (3), (4);
+# A connection is not killed for its own delete, nor for a delete
+# rolled back.
+BEGIN;
+SELECT * FROM t3;
+a
+1
+2
+3
+4
+DELETE FROM t3 WHERE a = 1;
+BEGIN;
+DELETE FROM t3 WHERE a = 2;
+ROLLBACK;
+SELECT * FROM t3;
+a
+2
+3
+4
+COMMIT;
+kills
+0
+DROP TABLE t1, t2, t3;

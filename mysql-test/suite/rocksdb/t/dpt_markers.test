@@ -1,0 +1,100 @@
+--source include/have_rocksdb.inc
+--source include/force_restart.inc
+# Range deletions fail with user defined timestamps, so DROP writes no marker.
+--source include/skip_udt_in_mem.inc
+
+# Checks which statements write delete persistence threshold (DPT) markers
+# into the RocksDB write batch. Markers are written only for deletes that
+# carry a DPT, either from the table option or from DELETE ... WITH DPT.
+
+--let $dpt_markers = query_get_value(SHOW GLOBAL STATUS LIKE 'rocksdb_delete_dpt_markers', Value, 1)
+
+CREATE TABLE t_plain (a INT PRIMARY KEY, b INT, KEY (b)) ENGINE=rocksdb;
+CREATE TABLE t_dpt (a INT PRIMARY KEY, b INT, c INT, KEY (b)) ENGINE=rocksdb DPT=100;
+INSERT INTO t_plain VALUES (1, 1), (2, 2), (3, 3), (4, 4);
+INSERT INTO t_dpt VALUES (1, 1, 1), (2, 2, 2), (3, 3, 3), (4, 4, 4);
+--source suite/rocksdb/include/dpt_markers_written.inc
+
+--echo # A table without DPT writes no markers.
+DELETE FROM t_plain WHERE a = 1;
+--source suite/rocksdb/include/dpt_markers_written.inc
+UPDATE t_plain SET b = 20 WHERE a = 2;
+--source suite/rocksdb/include/dpt_markers_written.inc
+
+--echo # DELETE ... WITH DPT writes markers on a table without DPT.
+DELETE FROM t_plain WHERE a = 2 WITH DPT=50;
+--source suite/rocksdb/include/dpt_markers_written.inc
+
+--echo # The table DPT applies to every delete.
+DELETE FROM t_dpt WHERE a = 1;
+--source suite/rocksdb/include/dpt_markers_written.inc
+
+--echo # DELETE ... WITH DPT on a table with DPT.
+DELETE FROM t_dpt WHERE a = 2 WITH DPT=500;
+--source suite/rocksdb/include/dpt_markers_written.inc
+
+--echo # An UPDATE that changes no key deletes nothing.
+UPDATE t_dpt SET c = 30 WHERE a = 3;
+--source suite/rocksdb/include/dpt_markers_written.inc
+
+--echo # An UPDATE that changes a secondary key deletes the old entry.
+UPDATE t_dpt SET b = 30 WHERE a = 3;
+--source suite/rocksdb/include/dpt_markers_written.inc
+
+--echo # An UPDATE that changes the primary key deletes the old row.
+UPDATE t_dpt SET a = 30 WHERE a = 3;
+--source suite/rocksdb/include/dpt_markers_written.inc
+
+--echo # Multi-table DELETE ... WITH DPT.
+INSERT INTO t_plain VALUES (5, 5), (6, 6);
+--source suite/rocksdb/include/dpt_markers_written.inc
+DELETE t_plain FROM t_plain JOIN t_dpt ON t_plain.a = t_dpt.a WITH DPT=50;
+--source suite/rocksdb/include/dpt_markers_written.inc
+DELETE t_plain FROM t_plain WHERE t_plain.a = 5;
+--source suite/rocksdb/include/dpt_markers_written.inc
+
+--echo # A transaction after a rollback writes its own markers.
+BEGIN;
+DELETE FROM t_dpt WHERE a = 4;
+ROLLBACK;
+--source suite/rocksdb/include/dpt_markers_written.inc
+DELETE FROM t_dpt WHERE a = 4;
+--source suite/rocksdb/include/dpt_markers_written.inc
+
+--echo # A delete rolled back to a savepoint.
+INSERT INTO t_dpt VALUES (7, 7, 7), (8, 8, 8);
+BEGIN;
+SAVEPOINT s1;
+DELETE FROM t_dpt WHERE a = 7;
+--source suite/rocksdb/include/dpt_markers_written.inc
+ROLLBACK TO SAVEPOINT s1;
+DELETE FROM t_dpt WHERE a = 8;
+--source suite/rocksdb/include/dpt_markers_written.inc
+COMMIT;
+SELECT * FROM t_dpt ORDER BY a;
+
+--echo # Dropping an index of a table with DPT.
+ALTER TABLE t_dpt DROP INDEX b, ALGORITHM=INPLACE;
+--source suite/rocksdb/include/dpt_markers_written.inc
+ALTER TABLE t_plain DROP INDEX b, ALGORITHM=INPLACE;
+--source suite/rocksdb/include/dpt_markers_written.inc
+
+--echo # Dropping tables.
+DROP TABLE t_plain;
+--source suite/rocksdb/include/dpt_markers_written.inc
+DROP TABLE t_dpt;
+--source suite/rocksdb/include/dpt_markers_written.inc
+
+--echo # Dropping a table with DPT through DeleteRange.
+SET @saved = @@global.rocksdb_enable_delete_range_for_drop_index;
+SET GLOBAL rocksdb_enable_delete_range_for_drop_index = ON;
+CREATE TABLE t_dpt (a INT PRIMARY KEY, b INT, KEY (b)) ENGINE=rocksdb DPT=100;
+INSERT INTO t_dpt VALUES (1, 1), (2, 2);
+--source suite/rocksdb/include/dpt_markers_written.inc
+ALTER TABLE t_dpt DROP INDEX b, ALGORITHM=INPLACE;
+--source suite/rocksdb/include/dpt_markers_written.inc
+TRUNCATE TABLE t_dpt;
+--source suite/rocksdb/include/dpt_markers_written.inc
+DROP TABLE t_dpt;
+--source suite/rocksdb/include/dpt_markers_written.inc
+SET GLOBAL rocksdb_enable_delete_range_for_drop_index = @saved;

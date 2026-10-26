@@ -972,6 +972,8 @@ rocksdb_delete_cf
 rocksdb_delete_obsolete_files_period_micros	21600000000
 rocksdb_disable_file_deletions	OFF
 rocksdb_disable_instant_ddl	OFF
+rocksdb_dpt_snapshot_margin_pct	50
+rocksdb_dpt_strict_snapshots	ON
 rocksdb_enable_autoinc_compat_mode	OFF
 rocksdb_enable_bulk_load_api	ON
 rocksdb_enable_delete_range_for_drop_index	OFF
@@ -1661,6 +1663,8 @@ rocksdb_compact_write_bytes	#
 rocksdb_compaction_key_drop_new	#
 rocksdb_compaction_key_drop_obsolete	#
 rocksdb_compaction_key_drop_user	#
+rocksdb_delete_dpt_markers	#
+rocksdb_dpt_snapshot_kills	#
 rocksdb_flush_write_bytes	#
 rocksdb_get_hit_l0	#
 rocksdb_get_hit_l1	#
@@ -1778,6 +1782,8 @@ ROCKSDB_COMPACTION_KEY_DROP_USER
 ROCKSDB_COMPACT_READ_BYTES
 ROCKSDB_COMPACT_WRITE_BYTES
 ROCKSDB_COVERED_SECONDARY_KEY_LOOKUPS
+ROCKSDB_DELETE_DPT_MARKERS
+ROCKSDB_DPT_SNAPSHOT_KILLS
 ROCKSDB_FLUSH_WRITE_BYTES
 ROCKSDB_GETUPDATESSINCE_CALLS
 ROCKSDB_GET_HIT_L0
@@ -1919,6 +1925,8 @@ ROCKSDB_COMPACTION_KEY_DROP_USER
 ROCKSDB_COMPACT_READ_BYTES
 ROCKSDB_COMPACT_WRITE_BYTES
 ROCKSDB_COVERED_SECONDARY_KEY_LOOKUPS
+ROCKSDB_DELETE_DPT_MARKERS
+ROCKSDB_DPT_SNAPSHOT_KILLS
 ROCKSDB_FLUSH_WRITE_BYTES
 ROCKSDB_GETUPDATESSINCE_CALLS
 ROCKSDB_GET_HIT_L0

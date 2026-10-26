@@ -1,0 +1,13 @@
+CREATE TABLE t1 (
+a int PRIMARY KEY
+) ENGINE=rocksdb DPT=10;
+insert into t1 values (1), (2), (3);
+delete from t1 WHERE a=1 WITH dpt=10;
+select * from t1;
+a
+2
+3
+delete from t1 with dpt=5;
+select * from t1;
+a
+drop table t1;

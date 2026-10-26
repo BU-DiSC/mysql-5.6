@@ -231,7 +231,8 @@ bool Sql_cmd_delete::delete_from_single_table(THD *thd) {
   Table_ref *const delete_table_ref = table_list->updatable_base_table();
   TABLE *const table = delete_table_ref->table;
 
-  table->s->dml_dpt = query_block->m_dpt;
+  table->dml_dpt = query_block->m_dpt;
+  auto reset_dml_dpt = create_scope_guard([table] { table->dml_dpt = 0; });
 
   const bool transactional_table = table->file->has_transactions();
 
@@ -639,9 +640,6 @@ bool Sql_cmd_delete::delete_from_single_table(THD *thd) {
 cleanup:
   assert(!lex->is_explain());
 
-  // Reset DML DPT
-  table->s->dml_dpt = 0;
-
   if (!transactional_table && deleted_rows > 0)
     thd->get_transaction()->mark_modified_non_trans_table(
         Transaction_ctx::STMT);
@@ -898,8 +896,22 @@ bool Sql_cmd_delete::execute_inner(THD *thd) {
     my_ok(thd);
     return false;
   }
-  return multitable ? Sql_cmd_dml::execute_inner(thd)
-                    : delete_from_single_table(thd);
+  if (!multitable) return delete_from_single_table(thd);
+
+  // The tables deleted from take the statement's WITH DPT.
+  Query_block *const query_block = lex->query_block;
+  for (Table_ref *tr = query_block->leaf_tables; tr != nullptr;
+       tr = tr->next_leaf) {
+    if (tr->updating && tr->table != nullptr)
+      tr->table->dml_dpt = query_block->m_dpt;
+  }
+  auto reset_dml_dpt = create_scope_guard([query_block] {
+    for (Table_ref *tr = query_block->leaf_tables; tr != nullptr;
+         tr = tr->next_leaf) {
+      if (tr->table != nullptr) tr->table->dml_dpt = 0;
+    }
+  });
+  return Sql_cmd_dml::execute_inner(thd);
 }
 
 /***************************************************************************

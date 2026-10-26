@@ -1,0 +1,103 @@
+CREATE TABLE t_plain (a INT PRIMARY KEY, b INT, KEY (b)) ENGINE=rocksdb;
+CREATE TABLE t_dpt (a INT PRIMARY KEY, b INT, c INT, KEY (b)) ENGINE=rocksdb DPT=100;
+INSERT INTO t_plain VALUES (1, 1), (2, 2), (3, 3), (4, 4);
+INSERT INTO t_dpt VALUES (1, 1, 1), (2, 2, 2), (3, 3, 3), (4, 4, 4);
+markers_written
+0
+# A table without DPT writes no markers.
+DELETE FROM t_plain WHERE a = 1;
+markers_written
+0
+UPDATE t_plain SET b = 20 WHERE a = 2;
+markers_written
+0
+# DELETE ... WITH DPT writes markers on a table without DPT.
+DELETE FROM t_plain WHERE a = 2 WITH DPT=50;
+markers_written
+1
+# The table DPT applies to every delete.
+DELETE FROM t_dpt WHERE a = 1;
+markers_written
+1
+# DELETE ... WITH DPT on a table with DPT.
+DELETE FROM t_dpt WHERE a = 2 WITH DPT=500;
+markers_written
+1
+# An UPDATE that changes no key deletes nothing.
+UPDATE t_dpt SET c = 30 WHERE a = 3;
+markers_written
+0
+# An UPDATE that changes a secondary key deletes the old entry.
+UPDATE t_dpt SET b = 30 WHERE a = 3;
+markers_written
+1
+# An UPDATE that changes the primary key deletes the old row.
+UPDATE t_dpt SET a = 30 WHERE a = 3;
+markers_written
+1
+# Multi-table DELETE ... WITH DPT.
+INSERT INTO t_plain VALUES (5, 5), (6, 6);
+markers_written
+0
+DELETE t_plain FROM t_plain JOIN t_dpt ON t_plain.a = t_dpt.a WITH DPT=50;
+markers_written
+1
+DELETE t_plain FROM t_plain WHERE t_plain.a = 5;
+markers_written
+0
+# A transaction after a rollback writes its own markers.
+BEGIN;
+DELETE FROM t_dpt WHERE a = 4;
+ROLLBACK;
+markers_written
+1
+DELETE FROM t_dpt WHERE a = 4;
+markers_written
+1
+# A delete rolled back to a savepoint.
+INSERT INTO t_dpt VALUES (7, 7, 7), (8, 8, 8);
+BEGIN;
+SAVEPOINT s1;
+DELETE FROM t_dpt WHERE a = 7;
+markers_written
+1
+ROLLBACK TO SAVEPOINT s1;
+DELETE FROM t_dpt WHERE a = 8;
+markers_written
+1
+COMMIT;
+SELECT * FROM t_dpt ORDER BY a;
+a	b	c
+7	7	7
+30	30	30
+# Dropping an index of a table with DPT.
+ALTER TABLE t_dpt DROP INDEX b, ALGORITHM=INPLACE;
+markers_written
+1
+ALTER TABLE t_plain DROP INDEX b, ALGORITHM=INPLACE;
+markers_written
+0
+# Dropping tables.
+DROP TABLE t_plain;
+markers_written
+0
+DROP TABLE t_dpt;
+markers_written
+1
+# Dropping a table with DPT through DeleteRange.
+SET @saved = @@global.rocksdb_enable_delete_range_for_drop_index;
+SET GLOBAL rocksdb_enable_delete_range_for_drop_index = ON;
+CREATE TABLE t_dpt (a INT PRIMARY KEY, b INT, KEY (b)) ENGINE=rocksdb DPT=100;
+INSERT INTO t_dpt VALUES (1, 1), (2, 2);
+markers_written
+0
+ALTER TABLE t_dpt DROP INDEX b, ALGORITHM=INPLACE;
+markers_written
+1
+TRUNCATE TABLE t_dpt;
+markers_written
+1
+DROP TABLE t_dpt;
+markers_written
+1
+SET GLOBAL rocksdb_enable_delete_range_for_drop_index = @saved;

@@ -622,6 +622,7 @@ class Rdb_key_def {
   inline bool has_ttl() const { return m_ttl_duration > 0; }
 
   inline bool has_dpt() const { return m_dpt > 0; }
+  inline uint64 get_dpt() const { return m_dpt; }
 
   [[nodiscard]] uint extract_partial_index_info(const TABLE &table_arg,
                                                 const Rdb_tbl_def &tbl_def_arg);

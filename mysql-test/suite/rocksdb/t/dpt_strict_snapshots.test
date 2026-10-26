@@ -1,0 +1,127 @@
+--source include/have_rocksdb.inc
+--source include/count_sessions.inc
+--source include/force_restart.inc
+
+--disable_query_log
+# Range deletions fail with user defined timestamps.
+call mtr.add_suppression("Failed to write range deletions with a delete persistence threshold");
+--enable_query_log
+
+# With rocksdb_dpt_strict_snapshots, a connection whose snapshot is older than
+# rocksdb_dpt_snapshot_margin_pct percent of the delete persistence threshold
+# (DPT) of a delete written after the snapshot is killed, so that the snapshot
+# cannot keep the tombstone from being compacted past its DPT.
+
+call mtr.add_suppression("Killed connection .*rocksdb_dpt_strict_snapshots");
+
+SELECT @@global.rocksdb_dpt_strict_snapshots;
+
+CREATE TABLE t1 (a INT PRIMARY KEY) ENGINE=rocksdb DPT=2;
+INSERT INTO t1 VALUES (1), (2), (3), (4);
+
+--let $kills = query_get_value(SHOW GLOBAL STATUS LIKE 'rocksdb_dpt_snapshot_kills', Value, 1)
+
+--echo # An old snapshot with no DPT delete after it survives.
+connect (con1, localhost, root,,);
+START TRANSACTION WITH CONSISTENT SNAPSHOT;
+SELECT * FROM t1;
+--sleep 3
+SELECT * FROM t1;
+COMMIT;
+
+--echo # Without the setting, an old snapshot with a DPT delete after it
+--echo # survives.
+connection default;
+SET GLOBAL rocksdb_dpt_strict_snapshots = OFF;
+connection con1;
+START TRANSACTION WITH CONSISTENT SNAPSHOT;
+SELECT * FROM t1;
+connection default;
+DELETE FROM t1 WHERE a = 1;
+--sleep 3
+connection con1;
+SELECT * FROM t1;
+COMMIT;
+connection default;
+--let $kills_now = query_get_value(SHOW GLOBAL STATUS LIKE 'rocksdb_dpt_snapshot_kills', Value, 1)
+--disable_query_log
+--eval SELECT $kills_now - $kills AS kills
+--enable_query_log
+
+--echo # With the setting, the connection holding an old snapshot with a DPT
+--echo # delete after it is killed.
+SET GLOBAL rocksdb_dpt_strict_snapshots = DEFAULT;
+connection con1;
+START TRANSACTION WITH CONSISTENT SNAPSHOT;
+SELECT * FROM t1;
+connection default;
+DELETE FROM t1 WHERE a = 2;
+--let $wait_condition = SELECT variable_value > $kills FROM performance_schema.global_status WHERE variable_name = 'rocksdb_dpt_snapshot_kills'
+--source include/wait_condition.inc
+connection con1;
+--error 2006,2013,4031
+SELECT * FROM t1;
+disconnect con1;
+connection default;
+
+--echo # A DELETE ... WITH DPT on a table without DPT counts too.
+CREATE TABLE t2 (a INT PRIMARY KEY) ENGINE=rocksdb;
+INSERT INTO t2 VALUES (1), (2);
+--let $kills = query_get_value(SHOW GLOBAL STATUS LIKE 'rocksdb_dpt_snapshot_kills', Value, 1)
+connect (con2, localhost, root,,);
+START TRANSACTION WITH CONSISTENT SNAPSHOT;
+SELECT * FROM t2;
+connection default;
+DELETE FROM t2 WHERE a = 1 WITH DPT=2;
+--let $wait_condition = SELECT variable_value > $kills FROM performance_schema.global_status WHERE variable_name = 'rocksdb_dpt_snapshot_kills'
+--source include/wait_condition.inc
+connection con2;
+--error 2006,2013,4031
+SELECT * FROM t2;
+disconnect con2;
+
+--echo # A connection without a snapshot is not killed.
+connection default;
+--let $kills = query_get_value(SHOW GLOBAL STATUS LIKE 'rocksdb_dpt_snapshot_kills', Value, 1)
+connect (con3, localhost, root,,);
+BEGIN;
+connection default;
+DELETE FROM t1 WHERE a = 3;
+--sleep 3
+connection con3;
+SELECT * FROM t1;
+COMMIT;
+disconnect con3;
+
+connection default;
+--let $kills_now = query_get_value(SHOW GLOBAL STATUS LIKE 'rocksdb_dpt_snapshot_kills', Value, 1)
+--disable_query_log
+--eval SELECT $kills_now - $kills AS kills
+--enable_query_log
+CREATE TABLE t3 (a INT PRIMARY KEY) ENGINE=rocksdb DPT=2;
+INSERT INTO t3 VALUES (1), (2), (3), (4);
+
+--echo # A connection is not killed for its own delete, nor for a delete
+--echo # rolled back.
+--let $kills = query_get_value(SHOW GLOBAL STATUS LIKE 'rocksdb_dpt_snapshot_kills', Value, 1)
+connect (con4, localhost, root,,);
+BEGIN;
+SELECT * FROM t3;
+DELETE FROM t3 WHERE a = 1;
+connection default;
+BEGIN;
+DELETE FROM t3 WHERE a = 2;
+ROLLBACK;
+--sleep 3
+connection con4;
+SELECT * FROM t3;
+COMMIT;
+disconnect con4;
+connection default;
+--let $kills_now = query_get_value(SHOW GLOBAL STATUS LIKE 'rocksdb_dpt_snapshot_kills', Value, 1)
+--disable_query_log
+--eval SELECT $kills_now - $kills AS kills
+--enable_query_log
+
+DROP TABLE t1, t2, t3;
+--source include/wait_until_count_sessions.inc

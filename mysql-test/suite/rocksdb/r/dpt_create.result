@@ -1,0 +1,4 @@
+CREATE TABLE t1 (
+a int PRIMARY KEY
+) ENGINE=rocksdb DPT=10;
+drop table t1;
