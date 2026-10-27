@@ -87,6 +87,7 @@ void Rdb_thread::signal(const bool stop_thread) {
     m_killed = THD::KILL_CONNECTION;
   }
 
+  m_signalled = true;
   mysql_cond_signal(&m_signal_cond);
 
   RDB_MUTEX_UNLOCK_CHECK(m_signal_mutex);

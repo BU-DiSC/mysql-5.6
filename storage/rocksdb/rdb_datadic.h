@@ -511,6 +511,9 @@ class Rdb_key_def {
     MAX_INDEX_ID_VERSION = 1,
     MAX_DD_INDEX_ID_VERSION = 1,
     DDL_CREATE_INDEX_ONGOING_VERSION = 1,
+    // Ongoing drop and create index entries of indexes with a delete
+    // persistence threshold also hold the threshold.
+    DDL_INDEX_ONGOING_DPT_VERSION = 2,
     AUTO_INCREMENT_VERSION = 1,
     DROPPED_CF_VERSION = 1,
     SERVER_VERSION_VERSION = 1,
@@ -1628,7 +1631,9 @@ class Rdb_binlog_manager {
 
   5. Ongoing drop index entry
   key: Rdb_key_def::DDL_DROP_INDEX_ONGOING(0x5) + cf_id + index_id
-  value: version
+  value: version [, dpt]
+  dpt, the delete persistence threshold in seconds, is 8 bytes and present
+  only in version DDL_INDEX_ONGOING_DPT_VERSION.
 
   6. index stats
   key: Rdb_key_def::INDEX_STATISTICS(0x6) + cf_id + index_id
@@ -1641,7 +1646,7 @@ class Rdb_binlog_manager {
 
   8. Ongoing create index entry
   key: Rdb_key_def::DDL_CREATE_INDEX_ONGOING(0x8) + cf_id + index_id
-  value: version
+  value: version [, dpt], as for the ongoing drop index entry
 
   9. auto_increment values
   key: Rdb_key_def::AUTO_INC(0x9) + cf_id + index_id
@@ -1774,17 +1779,21 @@ class Rdb_dict_manager : public Ensure_initialized {
                                   Rdb_key_def::DATA_DICT_TYPE dd_type) const;
   void start_ongoing_index_operation(rocksdb::WriteBatch &batch,
                                      const GL_INDEX_ID &gl_index_id,
-                                     Rdb_key_def::DATA_DICT_TYPE dd_type) const;
+                                     Rdb_key_def::DATA_DICT_TYPE dd_type,
+                                     uint64 dpt = 0) const;
+  uint64 get_index_operation_dpt(const GL_INDEX_ID &gl_index_id,
+                                 Rdb_key_def::DATA_DICT_TYPE dd_type) const;
   void end_ongoing_index_operation(rocksdb::WriteBatch &batch,
                                    const GL_INDEX_ID &gl_index_id,
                                    Rdb_key_def::DATA_DICT_TYPE dd_type) const;
   bool is_drop_index_empty() const;
   void add_drop_table(std::shared_ptr<Rdb_key_def> *const key_descr,
-                      uint32 n_keys, rocksdb::WriteBatch &batch) const;
+                      uint32 n_keys, rocksdb::WriteBatch &batch,
+                      uint64 dpt = 0) const;
   void add_drop_index(const std::unordered_set<GL_INDEX_ID> &gl_index_ids,
-                      rocksdb::WriteBatch &batch) const;
+                      rocksdb::WriteBatch &batch, uint64 dpt = 0) const;
   void add_create_index(const std::unordered_set<GL_INDEX_ID> &gl_index_ids,
-                        rocksdb::WriteBatch &batch) const;
+                        rocksdb::WriteBatch &batch, uint64 dpt = 0) const;
   void finish_indexes_operation(
       const std::unordered_set<GL_INDEX_ID> &gl_index_ids,
       Rdb_key_def::DATA_DICT_TYPE dd_type) const;
@@ -1802,14 +1811,21 @@ class Rdb_dict_manager : public Ensure_initialized {
                                 Rdb_key_def::DDL_CREATE_INDEX_ONGOING);
   }
   inline void start_drop_index(rocksdb::WriteBatch &wb,
-                               const GL_INDEX_ID &gl_index_id) const {
+                               const GL_INDEX_ID &gl_index_id,
+                               uint64 dpt = 0) const {
     start_ongoing_index_operation(wb, gl_index_id,
-                                  Rdb_key_def::DDL_DROP_INDEX_ONGOING);
+                                  Rdb_key_def::DDL_DROP_INDEX_ONGOING, dpt);
   }
   inline void start_create_index(rocksdb::WriteBatch &wb,
-                                 const GL_INDEX_ID &gl_index_id) const {
+                                 const GL_INDEX_ID &gl_index_id,
+                                 uint64 dpt = 0) const {
     start_ongoing_index_operation(wb, gl_index_id,
-                                  Rdb_key_def::DDL_CREATE_INDEX_ONGOING);
+                                  Rdb_key_def::DDL_CREATE_INDEX_ONGOING, dpt);
+  }
+  /* The delete persistence threshold of a dropped index, 0 if none. */
+  inline uint64 get_drop_index_dpt(const GL_INDEX_ID &gl_index_id) const {
+    return get_index_operation_dpt(gl_index_id,
+                                   Rdb_key_def::DDL_DROP_INDEX_ONGOING);
   }
   inline void finish_drop_indexes(
       const std::unordered_set<GL_INDEX_ID> &gl_index_ids) const {

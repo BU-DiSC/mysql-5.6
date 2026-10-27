@@ -422,7 +422,7 @@ static void rocksdb_select_bypass_rejected_query_history_size_update(
     void *const var_ptr, const void *const save);
 
 static int delete_range(const std::unordered_set<GL_INDEX_ID> &indices,
-                        uint64_t dpt);
+                        uint64_t dpt, bool *written = nullptr);
 
 static int rocksdb_force_flush_memtable_now(
     THD *const thd MY_ATTRIBUTE((__unused__)),
@@ -3798,13 +3798,12 @@ class Rdb_transaction {
   /*
     Delete persistence threshold markers (LogData) in the batch of each table
     type. A marker sets the threshold of the deletes after it in the batch.
-    m_delete_dpt and m_delete_dpt_time are those of the last marker, or 0 if
-    there is none, and are valid only if m_delete_dpt_known: a rollback to a
-    savepoint may have removed the last marker. m_delete_dpt_marked tells
-    whether the batch has a marker at all.
+    m_delete_dpt is the threshold of the last marker, or 0 if there is none,
+    and is valid only if m_delete_dpt_known: a rollback to a savepoint may have
+    removed the last marker. m_delete_dpt_marked tells whether the batch has a
+    marker at all.
   */
   uint64_t m_delete_dpt[2] = {0, 0};
-  uint64_t m_delete_dpt_time[2] = {0, 0};
   bool m_delete_dpt_known[2] = {true, true};
   bool m_delete_dpt_marked[2] = {false, false};
   /*
@@ -3819,7 +3818,6 @@ class Rdb_transaction {
   /* Call when the batch of table_type starts empty. */
   void reset_delete_dpt(TABLE_TYPE table_type) {
     m_delete_dpt[table_type] = 0;
-    m_delete_dpt_time[table_type] = 0;
     m_delete_dpt_known[table_type] = true;
     m_delete_dpt_marked[table_type] = false;
     if (table_type == TABLE_TYPE::USER_TABLE) {
@@ -5124,32 +5122,24 @@ class Rdb_transaction {
 
   /*
     Makes the deletes written next to the batch of table_type carry the delete
-    persistence threshold dpt in seconds (0 for none), with the current time
-    as their write time. Writes a marker only when the threshold or the second
-    changed since the last one.
+    persistence threshold dpt in seconds (0 for none). Writes a marker only
+    when the threshold changed since the last one. The marker has no write
+    time, so RocksDB dates it when the batch is written at commit (or at
+    prepare under two-phase commit), and the threshold counts from then.
   */
   [[nodiscard]] rocksdb::Status set_delete_dpt(TABLE_TYPE table_type,
                                                uint64_t dpt) {
     if (dpt == 0 && !m_delete_dpt_marked[table_type]) {
       return rocksdb::Status::OK();
     }
-    uint64_t now = 0;
-    if (dpt > 0) {
-      int64_t t = 0;
-      if (rocksdb::SystemClock::Default()->GetCurrentTime(&t).ok() && t > 0) {
-        now = static_cast<uint64_t>(t);
-      }
-    }
-    if (m_delete_dpt_known[table_type] && m_delete_dpt[table_type] == dpt &&
-        m_delete_dpt_time[table_type] == now) {
+    if (m_delete_dpt_known[table_type] && m_delete_dpt[table_type] == dpt) {
       return rocksdb::Status::OK();
     }
     const rocksdb::Status s = put_log_data(
         table_type,
-        rocksdb::WriteBatch::DeletePersistenceThresholdLogData(dpt, now));
+        rocksdb::WriteBatch::DeletePersistenceThresholdLogData(dpt, 0));
     if (s.ok()) {
       m_delete_dpt[table_type] = dpt;
-      m_delete_dpt_time[table_type] = now;
       m_delete_dpt_known[table_type] = true;
       m_delete_dpt_marked[table_type] = true;
       rocksdb_delete_dpt_markers++;
@@ -15166,9 +15156,7 @@ int ha_rocksdb::set_delete_dpt(Rdb_transaction *const tx) {
   of backups, are not covered. Deletes are noted when they commit, and the
   check runs once a second, so a snapshot may outlive the margin by about a
   second. A connection that releases its snapshot after the check but before
-  the kill is killed all the same. A tombstone's threshold counts from its
-  statement, not its commit, so a delete left uncommitted for longer than the
-  threshold is late whatever the snapshots.
+  the kill is killed all the same.
 
   A replica applying row based events does not see WITH DPT, which is not in
   the events, so only the thresholds of its tables bound its deletes.
@@ -15994,16 +15982,29 @@ rocksdb::Range ha_rocksdb::get_range(int i, uchar *buf) const {
 /*
   Writes range deletions over the given indexes. With a delete persistence
   threshold dpt in seconds, the range deletions carry it, so that the data is
-  removed from disk, WAL included, within the threshold. Indexes dropped
-  without them, by a rolled back ADD INDEX or by a crash between the data
-  dictionary commit and these writes, are removed by the background drop,
-  which has no bound.
+  removed from disk, WAL included, within the threshold. A failed write is not
+  an error, since the data is removed later anyway; written, if given, tells
+  whether the range deletions were written.
 */
 static int delete_range(const std::unordered_set<GL_INDEX_ID> &indices,
-                        uint64_t dpt) {
+                        uint64_t dpt, bool *written) {
   int ret = 0;
-  size_t default_cf_ts_sz = rocksdb_enable_udt_in_mem ? ROCKSDB_SIZEOF_UDT : 0;
-  rocksdb::WriteBatch batch = rocksdb::WriteBatch(0, 0, 0, default_cf_ts_sz);
+  if (written != nullptr) {
+    *written = false;
+  }
+  rocksdb::WriteBatch batch;
+  // With user defined timestamps, the range deletions are dated with the
+  // newest HLC, which is not older than any commit timestamp, so that they
+  // cover every version of the dropped keys.
+  std::string ts_buf;
+  const rocksdb::Slice ts =
+      rocksdb_enable_udt_in_mem
+          ? rocksdb::EncodeU64Ts(
+                std::max(mysql_bin_log.get_current_hlc(),
+                         mysql_bin_log.get_max_write_hlc_nsec()),
+                &ts_buf)
+          : rocksdb::Slice();
+  bool has_ts = false;
   if (dpt > 0) {
     // Callers may have committed the drop already, so carry on without the
     // threshold.
@@ -16050,7 +16051,12 @@ static int delete_range(const std::unordered_set<GL_INDEX_ID> &indices,
           "%u] with status [%s]",
           d.cf_id, d.index_id, status.ToString().c_str());
     }
-    status = batch.DeleteRange(cfh, range.start, range.limit);
+    if (rocksdb_enable_udt_in_mem && is_udt_compatible_cf(*cfh)) {
+      status = batch.DeleteRange(cfh, range.start, range.limit, ts);
+      has_ts = true;
+    } else {
+      status = batch.DeleteRange(cfh, range.start, range.limit);
+    }
     if (!status.ok()) {
       // NO_LINT_DEBUG
       LogPluginErrMsg(
@@ -16063,16 +16069,22 @@ static int delete_range(const std::unordered_set<GL_INDEX_ID> &indices,
     }
   }
 
-  // Followed the same policy as we do in Rdb_dict_manager::commit.
-  rocksdb::TransactionDBWriteOptimizations optimize;
-  optimize.skip_concurrency_control = true;
-  optimize.skip_duplicate_key_check = true;
-  rocksdb::Status status =
-      rdb->Write(rocksdb::WriteOptions(), optimize, &batch);
+  rocksdb::Status status;
+  if (has_ts) {
+    // TransactionDB takes timestamped writes only through transactions, which
+    // cannot write range deletions. The dropped keys see no other writes, so
+    // the base DB can take them without concurrency control.
+    status = rdb->GetBaseDB()->Write(rocksdb::WriteOptions(), &batch);
+  } else {
+    // Followed the same policy as we do in Rdb_dict_manager::commit.
+    rocksdb::TransactionDBWriteOptimizations optimize;
+    optimize.skip_concurrency_control = true;
+    optimize.skip_duplicate_key_check = true;
+    status = rdb->Write(rocksdb::WriteOptions(), optimize, &batch);
+  }
 
   if (!status.ok()) {
-    // The dropped data is removed later, though not within the threshold. With
-    // user defined timestamps the write always fails.
+    // The dropped data is removed later, though not within the threshold.
     if (dpt > 0) {
       // NO_LINT_DEBUG
       LogPluginErrMsg(
@@ -16082,6 +16094,9 @@ static int delete_range(const std::unordered_set<GL_INDEX_ID> &indices,
           dpt, status.ToString().c_str());
     }
     return HA_EXIT_SUCCESS;
+  }
+  if (written != nullptr) {
+    *written = true;
   }
   if (dpt > 0) {
     rocksdb_delete_dpt_markers++;
@@ -16130,6 +16145,11 @@ static bool is_myrocks_index_empty(rocksdb::ColumnFamilyHandle *cfh,
 void Rdb_drop_index_thread::run() {
   RDB_MUTEX_LOCK_CHECK(m_signal_mutex);
   auto dict_manager_list = dict_manager.get_all_dict_manager_selector();
+  // Dropped indexes with a delete persistence threshold that range deletions
+  // have been written for since startup. Written again after a restart, in
+  // case the crash lost them, so the first pass runs without waiting.
+  std::unordered_set<GL_INDEX_ID> dpt_written;
+  m_signalled = true;
   for (;;) {
     // The stop flag might be set by shutdown command
     // after drop_index_thread releases signal_mutex
@@ -16151,13 +16171,18 @@ void Rdb_drop_index_thread::run() {
     ts.tv_sec += is_drop_index_empty ? 24 * 60 * 60  // no filtering
                                      : 60;           // filtering
 
-    const auto ret MY_ATTRIBUTE((__unused__)) =
-        mysql_cond_timedwait(&m_signal_cond, &m_signal_mutex, &ts);
+    // Skip the wait if signalled while dropping, so that indexes dropped then,
+    // and range deletions with their thresholds, are not left for a minute.
+    if (!m_signalled) {
+      const auto ret MY_ATTRIBUTE((__unused__)) =
+          mysql_cond_timedwait(&m_signal_cond, &m_signal_mutex, &ts);
+      // make sure, no program error is returned
+      assert(ret == 0 || ret == ETIMEDOUT);
+    }
+    m_signalled = false;
     if (m_killed) {
       break;
     }
-    // make sure, no program error is returned
-    assert(ret == 0 || ret == ETIMEDOUT);
     RDB_MUTEX_UNLOCK_CHECK(m_signal_mutex);
     for (Rdb_dict_manager *local_dict_manager : dict_manager_list) {
       std::unordered_set<GL_INDEX_ID> indices;
@@ -16188,6 +16213,22 @@ void Rdb_drop_index_thread::run() {
           if (local_dict_manager->get_dropped_cf(d.cf_id)) {
             finished.insert(d);
             continue;
+          }
+
+          // Compaction removes the data without writing tombstones, so
+          // nothing bounds how long it, or the WAL holding it, stays. Range
+          // deletions with the threshold do.
+          if (dpt_written.count(d) == 0) {
+            const uint64_t dpt = local_dict_manager->get_drop_index_dpt(d);
+            bool written = true;
+            if (dpt > 0) {
+              delete_range({d}, dpt, &written);
+            }
+            // A failed write is retried on the next pass, if the index is not
+            // removed by then.
+            if (written) {
+              dpt_written.insert(d);
+            }
           }
 
           const bool is_reverse_cf = cf_flags & Rdb_key_def::REVERSE_CF_FLAG;
@@ -16225,6 +16266,9 @@ void Rdb_drop_index_thread::run() {
 
         if (!finished.empty()) {
           local_dict_manager->finish_drop_indexes(finished);
+          for (const auto &d : finished) {
+            dpt_written.erase(d);
+          }
         }
       }
 
@@ -16362,11 +16406,9 @@ int ha_rocksdb::delete_table(Rdb_tbl_def *const tbl) {
       if (err) {
         DBUG_RETURN(err);
       }
-      // Written already.
-      dpt = 0;
     } else {
       local_dict_manager->add_drop_table(tbl->m_key_descr_arr, tbl->m_key_count,
-                                         batch);
+                                         batch, dpt);
     }
     /*
       Remove the table entry in data dictionary (this will also remove it from
@@ -16377,15 +16419,6 @@ int ha_rocksdb::delete_table(Rdb_tbl_def *const tbl) {
     int err = local_dict_manager->commit(batch);
     if (err) {
       DBUG_RETURN(err);
-    }
-    // The background drop removes the data by compaction without writing
-    // tombstones, so nothing bounds how long it, or the WAL holding it, stays.
-    // Range deletions with the threshold do.
-    if (dpt > 0) {
-      err = delete_range(dropped_index_ids, dpt);
-      if (err) {
-        DBUG_RETURN(err);
-      }
     }
   }
 
@@ -18084,10 +18117,14 @@ int ha_rocksdb::inplace_populate_sk(
 
     /* Update the data dictionary */
     std::unordered_set<GL_INDEX_ID> create_index_ids;
+    // Kept with the entries, so that indexes rolled back, even after a crash,
+    // are dropped within the threshold.
+    uint64_t dpt = 0;
     for (const auto &index : indexes) {
       create_index_ids.insert(index->get_gl_index_id());
+      dpt = std::max(dpt, index->get_dpt());
     }
-    local_dict_manager->add_create_index(create_index_ids, batch);
+    local_dict_manager->add_create_index(create_index_ids, batch, dpt);
     res = local_dict_manager->commit(batch);
     if (res != HA_EXIT_SUCCESS) {
       return res;
@@ -18302,6 +18339,7 @@ bool ha_rocksdb::commit_inplace_alter_table(
       if (!gl_index_ids.empty()) {
         /* Rollback any partially created indexes of this table */
         local_dict_manager->rollback_ongoing_index_creation(gl_index_ids);
+        rdb_drop_idx_thread.signal();
       }
     }
 
@@ -18363,9 +18401,6 @@ bool ha_rocksdb::commit_inplace_alter_table(
         dict_manager.get_dict_manager_selector_non_const(table_default_cf_id);
     auto batch = Rdb_dict_manager::begin();
     std::unordered_set<GL_INDEX_ID> create_index_ids;
-    // Indexes dropped by compaction in the background that need range
-    // deletions with the table's delete persistence threshold.
-    std::unordered_set<GL_INDEX_ID> dropped_index_ids_with_dpt;
 
     m_tbl_def = ctx0->m_new_tdef;
     m_key_descr_arr = m_tbl_def->m_key_descr_arr;
@@ -18395,11 +18430,8 @@ bool ha_rocksdb::commit_inplace_alter_table(
             DBUG_RETURN(err);
           }
         } else {
-          local_dict_manager->add_drop_index(ctx->m_dropped_index_ids, batch);
-          if (table->s->create_dpt > 0) {
-            dropped_index_ids_with_dpt.insert(ctx->m_dropped_index_ids.begin(),
-                                              ctx->m_dropped_index_ids.end());
-          }
+          local_dict_manager->add_drop_index(ctx->m_dropped_index_ids, batch,
+                                             table->s->create_dpt);
         }
 
         for (const auto &index : ctx->m_added_indexes) {
@@ -18432,11 +18464,6 @@ bool ha_rocksdb::commit_inplace_alter_table(
       /* Mark ongoing create indexes as finished/remove from data dictionary */
       local_dict_manager->finish_indexes_operation(
           create_index_ids, Rdb_key_def::DDL_CREATE_INDEX_ONGOING);
-
-      if (!dropped_index_ids_with_dpt.empty() &&
-          delete_range(dropped_index_ids_with_dpt, table->s->create_dpt)) {
-        DBUG_RETURN(HA_EXIT_FAILURE);
-      }
     }
 
     DBUG_EXECUTE_IF("rocksdb_delete_index", {

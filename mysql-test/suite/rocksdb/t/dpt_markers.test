@@ -1,7 +1,5 @@
 --source include/have_rocksdb.inc
 --source include/force_restart.inc
-# Range deletions fail with user defined timestamps, so DROP writes no marker.
---source include/skip_udt_in_mem.inc
 
 # Checks which statements write delete persistence threshold (DPT) markers
 # into the RocksDB write batch. Markers are written only for deletes that
@@ -73,17 +71,25 @@ DELETE FROM t_dpt WHERE a = 8;
 COMMIT;
 SELECT * FROM t_dpt ORDER BY a;
 
---echo # Dropping an index of a table with DPT.
+--echo # Dropping an index of a table with DPT. The drop index thread writes
+--echo # the markers.
 ALTER TABLE t_dpt DROP INDEX b, ALGORITHM=INPLACE;
---source suite/rocksdb/include/dpt_markers_written.inc
+--source suite/rocksdb/include/dpt_markers_wait.inc
 ALTER TABLE t_plain DROP INDEX b, ALGORITHM=INPLACE;
 --source suite/rocksdb/include/dpt_markers_written.inc
+
+--echo # A failed ADD INDEX drops the partly built index within the DPT.
+INSERT INTO t_dpt VALUES (9, 9, 9), (10, 9, 9);
+--replace_regex /#sql-[0-9a-f_]*/#sql-temporary/
+--error ER_DUP_ENTRY
+ALTER TABLE t_dpt ADD UNIQUE INDEX c (c), ALGORITHM=INPLACE;
+--source suite/rocksdb/include/dpt_markers_wait.inc
 
 --echo # Dropping tables.
 DROP TABLE t_plain;
 --source suite/rocksdb/include/dpt_markers_written.inc
 DROP TABLE t_dpt;
---source suite/rocksdb/include/dpt_markers_written.inc
+--source suite/rocksdb/include/dpt_markers_wait.inc
 
 --echo # Dropping a table with DPT through DeleteRange.
 SET @saved = @@global.rocksdb_enable_delete_range_for_drop_index;

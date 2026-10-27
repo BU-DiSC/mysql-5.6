@@ -54,6 +54,10 @@ class Rdb_thread : public Ensure_initialized {
   // instead of volatile
   std::atomic<THD::killed_state> m_killed;
 
+  // Set by signal(), so that a thread busy when signalled can skip its next
+  // wait. Protected by m_signal_mutex.
+  bool m_signalled = false;
+
   virtual void on_init() {}
   virtual void on_uninit() {}
 

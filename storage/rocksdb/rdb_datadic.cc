@@ -6051,23 +6051,50 @@ bool Rdb_dict_manager::is_index_operation_ongoing(
  */
 void Rdb_dict_manager::start_ongoing_index_operation(
     rocksdb::WriteBatch &batch, const GL_INDEX_ID &gl_index_id,
-    Rdb_key_def::DATA_DICT_TYPE dd_type) const {
+    Rdb_key_def::DATA_DICT_TYPE dd_type, uint64 dpt) const {
   assert(dd_type == Rdb_key_def::DDL_DROP_INDEX_ONGOING ||
          dd_type == Rdb_key_def::DDL_CREATE_INDEX_ONGOING);
 
   Rdb_buf_writer<Rdb_key_def::INDEX_NUMBER_SIZE * 3> key_writer;
-  Rdb_buf_writer<Rdb_key_def::VERSION_SIZE> value_writer;
+  Rdb_buf_writer<Rdb_key_def::VERSION_SIZE + sizeof(uint64)> value_writer;
 
   dump_index_id(&key_writer, dd_type, gl_index_id);
 
   // version as needed
-  if (dd_type == Rdb_key_def::DDL_DROP_INDEX_ONGOING) {
+  if (dpt > 0) {
+    // Older versions do not read the value, so they still see the entry.
+    value_writer.write_uint16(Rdb_key_def::DDL_INDEX_ONGOING_DPT_VERSION);
+    value_writer.write_uint64(dpt);
+  } else if (dd_type == Rdb_key_def::DDL_DROP_INDEX_ONGOING) {
     value_writer.write_uint16(Rdb_key_def::DDL_DROP_INDEX_ONGOING_VERSION);
   } else {
     value_writer.write_uint16(Rdb_key_def::DDL_CREATE_INDEX_ONGOING_VERSION);
   }
 
   batch.Put(m_system_cfh, key_writer.to_slice(), value_writer.to_slice());
+}
+
+/*
+  Returns the delete persistence threshold stored with an ongoing drop or
+  create index entry, 0 if there is none.
+*/
+uint64 Rdb_dict_manager::get_index_operation_dpt(
+    const GL_INDEX_ID &gl_index_id, Rdb_key_def::DATA_DICT_TYPE dd_type) const {
+  assert(dd_type == Rdb_key_def::DDL_DROP_INDEX_ONGOING ||
+         dd_type == Rdb_key_def::DDL_CREATE_INDEX_ONGOING);
+
+  Rdb_buf_writer<Rdb_key_def::INDEX_NUMBER_SIZE * 3> key_writer;
+  dump_index_id(&key_writer, dd_type, gl_index_id);
+  std::string value;
+  if (!get_value(key_writer.to_slice(), &value).ok() ||
+      value.size() != Rdb_key_def::VERSION_SIZE + sizeof(uint64)) {
+    return 0;
+  }
+  const uchar *const ptr = reinterpret_cast<const uchar *>(value.data());
+  if (rdb_netbuf_to_uint16(ptr) != Rdb_key_def::DDL_INDEX_ONGOING_DPT_VERSION) {
+    return 0;
+  }
+  return rdb_netbuf_to_uint64(ptr + Rdb_key_def::VERSION_SIZE);
 }
 
 /*
@@ -6100,13 +6127,13 @@ bool Rdb_dict_manager::is_drop_index_empty() const {
  */
 void Rdb_dict_manager::add_drop_table(
     std::shared_ptr<Rdb_key_def> *const key_descr, uint32 n_keys,
-    rocksdb::WriteBatch &batch) const {
+    rocksdb::WriteBatch &batch, uint64 dpt) const {
   std::unordered_set<GL_INDEX_ID> dropped_index_ids;
   for (uint32 i = 0; i < n_keys; i++) {
     dropped_index_ids.insert(key_descr[i]->get_gl_index_id());
   }
 
-  add_drop_index(dropped_index_ids, batch);
+  add_drop_index(dropped_index_ids, batch, dpt);
 }
 
 /*
@@ -6116,10 +6143,10 @@ void Rdb_dict_manager::add_drop_table(
  */
 void Rdb_dict_manager::add_drop_index(
     const std::unordered_set<GL_INDEX_ID> &gl_index_ids,
-    rocksdb::WriteBatch &batch) const {
+    rocksdb::WriteBatch &batch, uint64 dpt) const {
   for (const auto &gl_index_id : gl_index_ids) {
     log_start_drop_index(gl_index_id, "Begin");
-    start_drop_index(batch, gl_index_id);
+    start_drop_index(batch, gl_index_id, dpt);
   }
 }
 
@@ -6130,13 +6157,13 @@ void Rdb_dict_manager::add_drop_index(
  */
 void Rdb_dict_manager::add_create_index(
     const std::unordered_set<GL_INDEX_ID> &gl_index_ids,
-    rocksdb::WriteBatch &batch) const {
+    rocksdb::WriteBatch &batch, uint64 dpt) const {
   for (const auto &gl_index_id : gl_index_ids) {
     // NO_LINT_DEBUG
     LogPluginErrMsg(INFORMATION_LEVEL, ER_LOG_PRINTF_MSG,
                     "RocksDB: Begin index creation (%u,%u)", gl_index_id.cf_id,
                     gl_index_id.index_id);
-    start_create_index(batch, gl_index_id);
+    start_create_index(batch, gl_index_id, dpt);
   }
 }
 
@@ -6220,7 +6247,11 @@ void Rdb_dict_manager::rollback_ongoing_index_creation(
                     "RocksDB: Removing incomplete create index (%u,%u)",
                     gl_index_id.cf_id, gl_index_id.index_id);
 
-    start_drop_index(batch, gl_index_id);
+    // The partly built index holds copies of the table's rows, so it is
+    // dropped within the table's threshold.
+    start_drop_index(batch, gl_index_id,
+                     get_index_operation_dpt(
+                         gl_index_id, Rdb_key_def::DDL_CREATE_INDEX_ONGOING));
   }
 
   commit(batch);

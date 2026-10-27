@@ -70,13 +70,20 @@ SELECT * FROM t_dpt ORDER BY a;
 a	b	c
 7	7	7
 30	30	30
-# Dropping an index of a table with DPT.
+# Dropping an index of a table with DPT. The drop index thread writes
+# the markers.
 ALTER TABLE t_dpt DROP INDEX b, ALGORITHM=INPLACE;
 markers_written
 1
 ALTER TABLE t_plain DROP INDEX b, ALGORITHM=INPLACE;
 markers_written
 0
+# A failed ADD INDEX drops the partly built index within the DPT.
+INSERT INTO t_dpt VALUES (9, 9, 9), (10, 9, 9);
+ALTER TABLE t_dpt ADD UNIQUE INDEX c (c), ALGORITHM=INPLACE;
+ERROR 23000: Duplicate entry '9' for key '#sql-temporary.c'
+markers_written
+1
 # Dropping tables.
 DROP TABLE t_plain;
 markers_written
