@@ -933,6 +933,9 @@ Gtid_event::Gtid_event(const char *buf, const Format_description_event *fde)
 
           if (READER_CALL(can_read, COMMIT_GROUP_TICKET_LENGTH)) {
             READER_TRY_SET(this->commit_group_ticket, read<uint64_t>);
+            if (READER_CALL(can_read, sizeof(source_dpt_write_time))) {
+              READER_TRY_SET(source_dpt_write_time, read<uint64_t>);
+            }
           }
         }
       }
@@ -957,9 +960,9 @@ void Gtid_event::set_commit_group_ticket_and_update_transaction_length(
     it was not yet considered.
   */
   assert(value > 0);
-  set_trx_length(transaction_length + (kGroupTicketUnset == commit_group_ticket
-                                           ? COMMIT_GROUP_TICKET_LENGTH
-                                           : 0));
+  if (commit_group_ticket == kGroupTicketUnset && source_dpt_write_time == 0) {
+    set_trx_length(transaction_length + COMMIT_GROUP_TICKET_LENGTH);
+  }
   commit_group_ticket = value;
 }
 

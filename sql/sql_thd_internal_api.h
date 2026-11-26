@@ -44,6 +44,7 @@
 #include "sql/select_lex_visitor.h"
 
 class THD;
+struct TABLE;
 class partition_info;
 
 THD *create_internal_thd();
@@ -195,6 +196,9 @@ int thd_non_transactional_update(const THD *thd);
   @return Value to be used as index into the binlog_format_names array
 */
 int thd_binlog_format(const THD *thd);
+
+/** Check whether the current statement writes row events for this table. */
+bool check_table_binlog_row_based(THD *thd, TABLE *table);
 
 /**
   Check if binary logging is filtered for thread's current db.

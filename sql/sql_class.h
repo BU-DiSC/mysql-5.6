@@ -1141,6 +1141,9 @@ class THD : public MDL_context_owner,
       user_vars{system_charset_info, key_memory_user_var_entry};
   struct rand_struct rand;              // used for authentication
   struct System_variables variables;    // Changeable local variables
+
+  // Set by the source storage engine at prepare, or read from the GTID event.
+  uint64_t source_dpt_write_time{0};
   struct System_status_var status_var;  // Per thread statistic vars
   struct System_status_var
       *copy_status_var_ptr;  // A copy of the statistic vars asof the start of

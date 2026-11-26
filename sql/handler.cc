@@ -112,6 +112,7 @@
 #include "sql/sql_base.h"  // free_io_cache
 #include "sql/sql_bitmap.h"
 #include "sql/sql_class.h"
+#include "sql/sql_thd_internal_api.h"
 #include "sql/sql_db.h"  // is_thd_db_read_only_by_name
 #include "sql/sql_error.h"
 #include "sql/sql_lex.h"
@@ -8009,7 +8010,7 @@ bool ha_show_status(THD *thd, handlerton *db_type, enum ha_stat_type stat) {
     is TRUE.
 */
 
-static bool check_table_binlog_row_based(THD *thd, TABLE *table) {
+bool check_table_binlog_row_based(THD *thd, TABLE *table) {
   if (table->s->cached_row_logging_check == -1) {
     int const check(table->s->tmp_table == NO_TMP_TABLE &&
                     !table->no_replicate &&

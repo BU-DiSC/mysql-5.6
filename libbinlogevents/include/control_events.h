@@ -1555,7 +1555,7 @@ class Gtid_event : public Binary_log_event {
   static const int MAX_DATA_LENGTH =
       FULL_COMMIT_TIMESTAMP_LENGTH + TRANSACTION_LENGTH_MAX_LENGTH +
       FULL_SERVER_VERSION_LENGTH +
-      COMMIT_GROUP_TICKET_LENGTH; /* 64-bit unsigned integer */
+      COMMIT_GROUP_TICKET_LENGTH + sizeof(uint64_t);
 
   static const int MAX_EVENT_LENGTH =
       LOG_EVENT_HEADER_LEN + POST_HEADER_LENGTH + MAX_DATA_LENGTH;
@@ -1578,6 +1578,16 @@ class Gtid_event : public Binary_log_event {
 
   /** Ticket number used to group sessions together during the BGC. */
   std::uint64_t commit_group_ticket{kGroupTicketUnset};
+
+  // Unix seconds at which the originating engine started the DPT countdown.
+  uint64_t source_dpt_write_time{0};
+
+  size_t get_dpt_extension_length() const {
+    if (source_dpt_write_time == 0) return 0;
+    return sizeof(source_dpt_write_time) +
+           (commit_group_ticket == kGroupTicketUnset ? COMMIT_GROUP_TICKET_LENGTH
+                                                     : 0);
+  }
 
   /**
     Returns the length of the packed `commit_group_ticket` field. It may be

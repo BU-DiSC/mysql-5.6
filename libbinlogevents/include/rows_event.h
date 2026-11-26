@@ -61,7 +61,8 @@
   the container Extra_row_info, this is different from the format information
   stored inside extra_row_ndb_info at EXTRA_ROW_INFO_FORMAT_OFFSET.
 */
-enum class enum_extra_row_info_typecode { NDB = 0, PART = 1 };
+enum class enum_extra_row_info_typecode { NDB = 0, PART = 1, DELETE_DPT = 2 };
+constexpr size_t EXTRA_ROW_DELETE_DPT_LENGTH = 1 + sizeof(uint64_t);
 
 namespace binary_log {
 /**
@@ -1018,6 +1019,7 @@ class Rows_event : public Binary_log_event {
       This variable is used only in case of Update_event.
     */
     int m_source_partition_id;
+    uint64_t m_delete_dpt{0};
     /** The extra row info provided by NDB */
     unsigned char *m_extra_row_ndb_info;
 
@@ -1028,6 +1030,9 @@ class Rows_event : public Binary_log_event {
           m_extra_row_ndb_info(nullptr) {}
 
     Extra_row_info(const Extra_row_info &) = delete;
+
+    uint64_t get_delete_dpt() const { return m_delete_dpt; }
+    void set_delete_dpt(uint64_t dpt) { m_delete_dpt = dpt; }
 
     int get_partition_id() const { return m_partition_id; }
     void set_partition_id(int partition_id) {

@@ -1,0 +1,72 @@
+--source include/have_rocksdb.inc
+--source include/have_binlog_format_row.inc
+--source include/master-slave.inc
+
+--disable_query_log
+connection master;
+CREATE TABLE t (id INT PRIMARY KEY) ENGINE=ROCKSDB;
+INSERT INTO t VALUES (1), (2);
+SET SESSION rocksdb_commit_in_the_middle = ON;
+--disable_result_log
+--error ER_UNSUPPORTED_EXTENSION
+DELETE FROM t WHERE id = 1 WITH DPT=3600;
+--enable_result_log
+SET SESSION rocksdb_commit_in_the_middle = OFF;
+SET GLOBAL rocksdb_force_flush_memtable_now = 1;
+--source include/sync_slave_sql_with_master.inc
+connection slave;
+SET GLOBAL rocksdb_force_flush_memtable_now = 1;
+let $before = query_get_value(SHOW GLOBAL STATUS LIKE 'Rocksdb_delete_dpt_markers', Value, 1);
+--disable_result_log
+--source include/stop_slave_sql.inc
+--enable_result_log
+
+connection master;
+DELETE FROM t WHERE id = 1 WITH DPT=3600;
+DELETE FROM t WHERE id = 2;
+SET GLOBAL rocksdb_force_flush_memtable_now = 1;
+
+# Put the replica's local apply time in a different clock second.
+--sleep 2
+connection slave;
+--disable_result_log
+--source include/start_slave_sql.inc
+--enable_result_log
+connection master;
+--source include/sync_slave_sql_with_master.inc
+connection slave;
+--enable_query_log
+SELECT COUNT(*) AS rows_remaining FROM t;
+--disable_query_log
+--eval SELECT VARIABLE_VALUE - $before AS replica_dpt_markers FROM performance_schema.global_status WHERE VARIABLE_NAME = 'Rocksdb_delete_dpt_markers';
+
+SET GLOBAL rocksdb_force_flush_memtable_now = 1;
+
+--perl
+my $root = $ENV{'MYSQLTEST_VARDIR'};
+my $ldb = "$ENV{'MYSQL_CLIENT_BIN_PATH'}/ldb";
+my @write_times;
+for my $server (1, 2) {
+  my $db = "$root/mysqld.$server/data/.rocksdb";
+  open my $current, '<', "$db/CURRENT" or die "Read CURRENT: $!";
+  chomp(my $manifest = <$current>);
+  close $current;
+  open my $dump, '-|', $ldb, 'manifest_dump', "--path=$db/$manifest",
+       '--verbose', '--json' or die "Run ldb: $!";
+  my %times;
+  while (<$dump>) {
+    next unless /"TombstoneDpts"/;
+    $times{$1} = 1 while /\]:3600@(\d+)/g;
+  }
+  close $dump or die "Manifest dump failed for server $server";
+  my @times = keys %times;
+  die "Expected one DPT write time on server $server" unless @times == 1;
+  push @write_times, $times[0];
+}
+die "Replica changed source DPT write time" unless $write_times[0] == $write_times[1];
+print "Source and replica persisted the same DPT write time.\n";
+EOF
+
+connection master;
+DROP TABLE t;
+--source include/rpl_end.inc

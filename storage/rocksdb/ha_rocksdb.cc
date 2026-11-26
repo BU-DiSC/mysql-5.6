@@ -58,6 +58,7 @@
 #include "sql/dd/dd.h"                       // dd::get_dictionary
 #include "sql/dd/dictionary.h"               // dd::Dictionary
 #include "sql/debug_sync.h"
+#include "sql/mysqld.h"
 #include "sql/mysqld_thd_manager.h"
 #include "sql/rpl_rli.h"
 #include "sql/sql_audit.h"
@@ -69,6 +70,7 @@
 #include "sql/strfunc.h"
 
 /* RocksDB includes */
+#include "db/write_batch_internal.h"
 #include "monitoring/histogram.h"
 #include "rocksdb/compaction_filter.h"
 #include "rocksdb/convenience.h"
@@ -3804,6 +3806,8 @@ class Rdb_transaction {
     marker at all.
   */
   uint64_t m_delete_dpt[2] = {0, 0};
+  uint64_t m_delete_dpt_write_time[2] = {0, 0};
+  bool m_has_source_statement_dpt = false;
   bool m_delete_dpt_known[2] = {true, true};
   bool m_delete_dpt_marked[2] = {false, false};
   /*
@@ -3815,13 +3819,17 @@ class Rdb_transaction {
  protected:
   Rdb_io_perf *m_tbl_io_perf;
 
+  bool has_source_statement_dpt() const { return m_has_source_statement_dpt; }
+
   /* Call when the batch of table_type starts empty. */
   void reset_delete_dpt(TABLE_TYPE table_type) {
     m_delete_dpt[table_type] = 0;
+    m_delete_dpt_write_time[table_type] = 0;
     m_delete_dpt_known[table_type] = true;
     m_delete_dpt_marked[table_type] = false;
     if (table_type == TABLE_TYPE::USER_TABLE) {
       m_uncommitted_delete_dpts.clear();
+      m_has_source_statement_dpt = false;
     }
   }
 
@@ -5083,6 +5091,8 @@ class Rdb_transaction {
   */
   bool flush_batch(TABLE_TYPE table_type) {
     if (get_write_count(table_type) == 0) return false;
+    // A binlogged WITH DPT must reach prepare in the same batch as its rows.
+    if (table_type == USER_TABLE && m_has_source_statement_dpt) return true;
 
     /* Commit the current transaction */
     if (commit_no_binlog(table_type)) return true;
@@ -5122,24 +5132,29 @@ class Rdb_transaction {
 
   /*
     Makes the deletes written next to the batch of table_type carry the delete
-    persistence threshold dpt in seconds (0 for none). Writes a marker only
-    when the threshold changed since the last one. The marker has no write
-    time, so RocksDB dates it when the batch is written at commit (or at
-    prepare under two-phase commit), and the threshold counts from then.
+    persistence threshold dpt in seconds (0 for none). Writes a marker when
+    the threshold or its source timestamp changes. A zero write time allows
+    the storage engine to stamp the marker at prepare or commit.
   */
   [[nodiscard]] rocksdb::Status set_delete_dpt(TABLE_TYPE table_type,
-                                               uint64_t dpt) {
+                                               uint64_t dpt,
+                                               uint64_t write_time,
+                                               bool source_statement_dpt) {
+    m_has_source_statement_dpt |= source_statement_dpt;
     if (dpt == 0 && !m_delete_dpt_marked[table_type]) {
       return rocksdb::Status::OK();
     }
-    if (m_delete_dpt_known[table_type] && m_delete_dpt[table_type] == dpt) {
+    if (m_delete_dpt_known[table_type] && m_delete_dpt[table_type] == dpt &&
+        m_delete_dpt_write_time[table_type] == write_time) {
       return rocksdb::Status::OK();
     }
     const rocksdb::Status s = put_log_data(
         table_type,
-        rocksdb::WriteBatch::DeletePersistenceThresholdLogData(dpt, 0));
+        rocksdb::WriteBatch::DeletePersistenceThresholdLogData(dpt,
+                                                               write_time));
     if (s.ok()) {
       m_delete_dpt[table_type] = dpt;
+      m_delete_dpt_write_time[table_type] = write_time;
       m_delete_dpt_known[table_type] = true;
       m_delete_dpt_marked[table_type] = true;
       rocksdb_delete_dpt_markers++;
@@ -5588,12 +5603,32 @@ class Rdb_transaction_impl : public Rdb_transaction {
       return false;
     }
 
+    const bool source = m_thd->rli_slave == nullptr;
+    uint64_t source_write_time = 0;
+    if (source && has_source_statement_dpt()) {
+      auto *batch = m_rocksdb_tx[TABLE_TYPE::USER_TABLE]
+                        ->GetWriteBatch()
+                        ->GetWriteBatch();
+      // The binlog transaction header is generated after engine prepare.
+      // Give the header and the source markers exactly the same start time.
+      int64_t now = 0;
+      s = rdb->GetEnv()->GetSystemClock()->GetCurrentTime(&now);
+      if (!s.ok()) {
+        my_error(ER_INTERNAL_ERROR, MYF(0), s.ToString().c_str());
+        return false;
+      }
+      source_write_time = static_cast<uint64_t>(now);
+      rocksdb::WriteBatchInternal::SetDeletePersistenceThresholdWriteTimes(
+          batch, source_write_time);
+    }
+
     s = m_rocksdb_tx[TABLE_TYPE::USER_TABLE]->Prepare();
     if (!s.ok()) {
       std::string msg = "RocksDB error on COMMIT (Prepare): " + s.ToString();
       my_error(ER_INTERNAL_ERROR, MYF(0), msg.c_str());
       return false;
     }
+    if (source) m_thd->source_dpt_write_time = source_write_time;
     return true;
   }
 
@@ -15140,7 +15175,21 @@ int ha_rocksdb::set_delete_dpt(Rdb_transaction *const tx) {
     // separate deletes from the marker before them.
     return HA_ERR_UNSUPPORTED;
   }
-  const rocksdb::Status s = tx->set_delete_dpt(table_type, dpt);
+  THD *const thd = table->in_use;
+  const bool source_statement_dpt =
+      dml_dpt != 0 && thd->rli_slave == nullptr &&
+      check_table_binlog_row_based(thd, table);
+  if (source_statement_dpt &&
+      (log_bin_use_v1_row_events || tx->is_writebatch_trx() ||
+       commit_in_the_middle(thd))) {
+    // These source modes cannot carry the same start time for every delete.
+    return HA_ERR_UNSUPPORTED;
+  }
+  const uint64_t write_time = dml_dpt != 0 && thd->rli_slave != nullptr
+                                  ? thd->source_dpt_write_time
+                                  : 0;
+  const rocksdb::Status s =
+      tx->set_delete_dpt(table_type, dpt, write_time, source_statement_dpt);
   if (!s.ok()) {
     return rdb_error_to_mysql(s);
   }
@@ -15158,8 +15207,8 @@ int ha_rocksdb::set_delete_dpt(Rdb_transaction *const tx) {
   second. A connection that releases its snapshot after the check but before
   the kill is killed all the same.
 
-  A replica applying row based events does not see WITH DPT, which is not in
-  the events, so only the thresholds of its tables bound its deletes.
+  Replicas track committed delete thresholds against their local snapshot
+  times. The source start time is used separately for FADE scheduling.
 */
 static void rdb_kill_snapshots_past_dpt() {
   if (!rocksdb_dpt_strict_snapshots || rdb == nullptr) {

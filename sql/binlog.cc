@@ -2013,6 +2013,11 @@ bool MYSQL_BIN_LOG::write_transaction(THD *thd, binlog_cache_data *cache_data,
       immediate_commit_timestamp, trx_original_server_version,
       trx_immediate_server_version);
 
+  if (cache_data->is_trx_cache()) {
+    gtid_event.source_dpt_write_time = thd->source_dpt_write_time;
+    thd->source_dpt_write_time = 0;
+  }
+
   // Set the transaction length, based on cache info
   gtid_event.set_trx_length_by_cache_size(cache_data->get_byte_position(),
                                           writer->is_checksum_enabled(),
@@ -15038,6 +15043,11 @@ Rows_log_event *THD::binlog_prepare_pending_rows_event(
   /* Fetch the type code for the RowsEventT template parameter */
   int const general_type_code = RowsEventT::TYPE_CODE;
 
+  const uint64_t delete_dpt =
+      general_type_code == binary_log::DELETE_ROWS_EVENT &&
+              !log_bin_use_v1_row_events
+          ? table->dml_dpt
+          : 0;
   partition_info *part_info = table->part_info;
   auto part_id = get_rpl_part_id(part_info);
 
@@ -15065,12 +15075,14 @@ Rows_log_event *THD::binlog_prepare_pending_rows_event(
       pending->get_data_size() + needed > binlog_row_event_max_size ||
       pending->m_row_count >= opt_binlog_rows_event_max_rows ||
       pending->read_write_bitmaps_cmp(table) == false ||
+      pending->m_extra_row_info.get_delete_dpt() != delete_dpt ||
       !(pending->m_extra_row_info.compare_extra_row_info(
           extra_row_info, part_id, source_part_id))) {
     /* Create a new RowsEventT... */
     Rows_log_event *const ev = new RowsEventT(
         this, table, table->s->table_map_id, is_transactional, extra_row_info);
     if (unlikely(!ev)) return nullptr;
+    ev->m_extra_row_info.set_delete_dpt(delete_dpt);
     ev->server_id = serv_id;  // I don't like this, it's too easy to forget.
     /*
       flush the pending event and replace it with the newly created

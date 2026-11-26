@@ -8536,6 +8536,8 @@ size_t Rows_log_event::get_data_size() {
       common_header->type_code > binary_log::DELETE_ROWS_EVENT_V1;
   if (is_v2_event) {
     data_size = Binary_log_event::ROWS_HEADER_LEN_V2;
+    if (m_extra_row_info.get_delete_dpt() != 0)
+      data_size += EXTRA_ROW_DELETE_DPT_LENGTH;
     if (m_extra_row_info.have_ndb_info())
       data_size +=
           EXTRA_ROW_INFO_TYPECODE_LENGTH + m_extra_row_info.get_ndb_length();
@@ -10507,10 +10509,15 @@ int Rows_log_event::force_write_to_binlog(table_def *tabledef,
         else
           store_record(m_table, record[1]);
         break;
-      case binary_log::DELETE_ROWS_EVENT:
+      case binary_log::DELETE_ROWS_EVENT: {
+        const uint64_t saved_dpt = m_table->dml_dpt;
+        m_table->dml_dpt = m_extra_row_info.get_delete_dpt();
+        const auto restore_dpt =
+            create_scope_guard([&] { m_table->dml_dpt = saved_dpt; });
         error = Delete_rows_log_event::binlog_row_logging_function(
             thd, m_table, has_trans, m_table->record[0], NULL);
         break;
+      }
       default:
         sql_print_error("Got event other than rows event at %s:%llu",
                         rli->get_rpl_log_name(), common_header->log_pos);
@@ -11518,6 +11525,8 @@ bool Rows_log_event::write_data_header(Basic_ostream *ostream) {
        Determine length of variable header payload(extra_row_info part)
     */
     uint extra_row_info_payloadlen = EXTRA_ROW_INFO_HEADER_LENGTH;
+    if (m_extra_row_info.get_delete_dpt() != 0)
+      extra_row_info_payloadlen += EXTRA_ROW_DELETE_DPT_LENGTH;
     if (m_extra_row_info.have_ndb_info()) {
       extra_row_info_payloadlen +=
           (EXTRA_ROW_INFO_TYPECODE_LENGTH + m_extra_row_info.get_ndb_length());
@@ -11571,6 +11580,14 @@ bool Rows_log_event::write_data_header(Basic_ostream *ostream) {
 
       if (wrapper_my_b_safe_write(ostream, partition_buf,
                                   extra_part_info_data_len))
+        return true;
+    }
+    if (const uint64_t dpt = m_extra_row_info.get_delete_dpt()) {
+      // Write this last so older readers can skip it and still read the rows.
+      uchar dpt_buf[EXTRA_ROW_DELETE_DPT_LENGTH];
+      dpt_buf[0] = static_cast<uchar>(enum_extra_row_info_typecode::DELETE_DPT);
+      int8store(dpt_buf + 1, dpt);
+      if (wrapper_my_b_safe_write(ostream, dpt_buf, sizeof(dpt_buf)))
         return true;
     }
   } else {
@@ -13872,7 +13889,13 @@ int Delete_rows_log_event::do_exec_row(const Relay_log_info *const rli) {
   if (invoke_triggers &&
       process_triggers(TRG_EVENT_DELETE, TRG_ACTION_BEFORE, false))
     error = HA_ERR_GENERIC;  // in case if error is not set yet
-  if (!error) error = m_table->file->ha_delete_row(m_table->record[0]);
+  if (!error) {
+    const uint64_t saved_dpt = m_table->dml_dpt;
+    m_table->dml_dpt = m_extra_row_info.get_delete_dpt();
+    const auto restore_dpt =
+        create_scope_guard([&] { m_table->dml_dpt = saved_dpt; });
+    error = m_table->file->ha_delete_row(m_table->record[0]);
+  }
   if (invoke_triggers && !error &&
       process_triggers(TRG_EVENT_DELETE, TRG_ACTION_AFTER, false))
     error = HA_ERR_GENERIC;  // in case if error is not set yet
@@ -14840,9 +14863,14 @@ uint32 Gtid_log_event::write_body_to_memory(uchar *buffer) {
     ptr_buffer += ORIGINAL_SERVER_VERSION_LENGTH;
   }
 
-  if (this->commit_group_ticket != binlog::BgcTicket::kTicketUnset) {
-    int8store(ptr_buffer, this->commit_group_ticket);
+  if (commit_group_ticket != binlog::BgcTicket::kTicketUnset ||
+      source_dpt_write_time != 0) {
+    int8store(ptr_buffer, commit_group_ticket);
     ptr_buffer += COMMIT_GROUP_TICKET_LENGTH;
+  }
+  if (source_dpt_write_time != 0) {
+    int8store(ptr_buffer, source_dpt_write_time);
+    ptr_buffer += sizeof(source_dpt_write_time);
   }
 
   return ptr_buffer - buffer;
@@ -14929,6 +14957,7 @@ int Gtid_log_event::do_apply_event(Relay_log_info const *rli) {
     0 will be used if this event does not contain such information.
   */
   enum_gtid_statement_status state = gtid_pre_statement_checks(thd);
+  thd->source_dpt_write_time = source_dpt_write_time;
   thd->variables.original_commit_timestamp = original_commit_timestamp;
   thd->set_original_commit_timestamp_for_slave_thread();
   /**
@@ -15035,6 +15064,7 @@ void Gtid_log_event::set_trx_length_by_cache_size(ulonglong cache_size,
   transaction_length += POST_HEADER_LENGTH;
   transaction_length += get_commit_timestamp_length();
   transaction_length += get_server_version_length();
+  transaction_length += get_dpt_extension_length();
   transaction_length += is_checksum_enabled ? BINLOG_CHECKSUM_LEN : 0;
 
   /*

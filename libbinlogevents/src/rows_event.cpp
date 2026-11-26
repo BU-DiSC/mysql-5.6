@@ -498,6 +498,18 @@ Rows_event::Rows_event(const char *buf, const Format_description_event *fde)
           }
           break;
         }
+        case enum_extra_row_info_typecode::DELETE_DPT: {
+          if (event_type != DELETE_ROWS_EVENT ||
+              end - READER_CALL(position) < sizeof(uint64_t) ||
+              m_extra_row_info.get_delete_dpt() != 0) {
+            READER_THROW("Invalid delete DPT in rows event");
+          }
+          uint64_t dpt = 0;
+          READER_TRY_SET(dpt, read<uint64_t>);
+          if (dpt == 0) READER_THROW("Zero delete DPT in rows event");
+          m_extra_row_info.set_delete_dpt(dpt);
+          break;
+        }
         default:
           /* Unknown code, we will not understand anything further here */
           READER_CALL(go_to, end); /* Break loop */
