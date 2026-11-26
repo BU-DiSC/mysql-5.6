@@ -1,0 +1,44 @@
+# original_dpt_write_time: session only, set by mysqlbinlog output under
+# pseudo_replica_mode to replay the source's DPT start time.
+
+--error ER_INCORRECT_GLOBAL_LOCAL_VAR
+SELECT @@GLOBAL.original_dpt_write_time;
+SELECT @@SESSION.original_dpt_write_time;
+SHOW VARIABLES LIKE 'original_dpt_write_time';
+
+--error ER_LOCAL_VARIABLE
+SET @@GLOBAL.original_dpt_write_time = 123456;
+
+--echo # Requires pseudo_replica_mode.
+--error ER_WRONG_VALUE_FOR_VAR
+SET @@SESSION.original_dpt_write_time = 123456;
+
+SET @@SESSION.pseudo_replica_mode = 1;
+SET @@SESSION.original_dpt_write_time = 123456;
+SELECT @@SESSION.original_dpt_write_time;
+SET @@SESSION.original_dpt_write_time = 0;
+SELECT @@SESSION.original_dpt_write_time;
+--error ER_WRONG_TYPE_FOR_VAR
+SET @@SESSION.original_dpt_write_time = 'xyz';
+
+--echo # Turning off pseudo_replica_mode clears it.
+SET @@SESSION.original_dpt_write_time = 123456;
+SET @@SESSION.pseudo_replica_mode = 0;
+SELECT @@SESSION.original_dpt_write_time;
+
+--echo # Cannot change inside a transaction.
+SET @@SESSION.pseudo_replica_mode = 1;
+BEGIN;
+--error ER_VARIABLE_NOT_SETTABLE_IN_TRANSACTION
+SET @@SESSION.original_dpt_write_time = 123456;
+COMMIT;
+SET @@SESSION.pseudo_replica_mode = 0;
+
+--echo # Requires SESSION_VARIABLES_ADMIN or REPLICATION_APPLIER.
+CREATE USER dpt_user;
+--connect (dpt_con, localhost, dpt_user,,)
+--error ER_SPECIFIC_ACCESS_DENIED_ERROR
+SET @@SESSION.original_dpt_write_time = 123456;
+--connection default
+--disconnect dpt_con
+DROP USER dpt_user;

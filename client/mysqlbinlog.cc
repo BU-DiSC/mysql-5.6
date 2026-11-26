@@ -1658,7 +1658,23 @@ static Exit_status process_event(PRINT_EVENT_INFO *print_event_info,
 
     DBUG_PRINT("debug", ("event_type: %s", ev->get_type_str()));
 
-    if (shall_skip_gtids(ev, &cached_gtid)) goto end;
+    const bool skip_gtid_event = shall_skip_gtids(ev, &cached_gtid);
+    if (!filter_based_on_gtids && !short_form &&
+        print_event_info->base64_output_mode == BASE64_OUTPUT_AUTO &&
+        (ev_type == binary_log::GTID_LOG_EVENT ||
+         ev_type == binary_log::ANONYMOUS_GTID_LOG_EVENT)) {
+      const auto *gtid = down_cast<const Gtid_log_event *>(ev);
+      const uint64_t write_time = gtid->source_dpt_write_time;
+      // Re-logging may consume the setting, even if the next GTID has
+      // the same start time.
+      if (write_time != 0 ||
+          print_event_info->printed_source_dpt_write_time != 0) {
+        my_b_printf(head, "SET @@SESSION.original_dpt_write_time=%s%s\n",
+                    llstr(write_time, ll_buff), print_event_info->delimiter);
+        print_event_info->printed_source_dpt_write_time = write_time;
+      }
+    }
+    if (skip_gtid_event) goto end;
 
     switch (ev_type) {
       case binary_log::TRANSACTION_PAYLOAD_EVENT:

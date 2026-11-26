@@ -1,0 +1,46 @@
+SELECT @@GLOBAL.original_dpt_write_time;
+ERROR HY000: Variable 'original_dpt_write_time' is a SESSION variable
+SELECT @@SESSION.original_dpt_write_time;
+@@SESSION.original_dpt_write_time
+0
+SHOW VARIABLES LIKE 'original_dpt_write_time';
+Variable_name	Value
+original_dpt_write_time	0
+SET @@GLOBAL.original_dpt_write_time = 123456;
+ERROR HY000: Variable 'original_dpt_write_time' is a SESSION variable and can't be used with SET GLOBAL
+# Requires pseudo_replica_mode.
+SET @@SESSION.original_dpt_write_time = 123456;
+ERROR 42000: Variable 'original_dpt_write_time' can't be set to the value of 'requires pseudo_replica_mode'
+SET @@SESSION.pseudo_replica_mode = 1;
+SET @@SESSION.original_dpt_write_time = 123456;
+SELECT @@SESSION.original_dpt_write_time;
+@@SESSION.original_dpt_write_time
+123456
+SET @@SESSION.original_dpt_write_time = 0;
+SELECT @@SESSION.original_dpt_write_time;
+@@SESSION.original_dpt_write_time
+0
+SET @@SESSION.original_dpt_write_time = 'xyz';
+ERROR 42000: Incorrect argument type to variable 'original_dpt_write_time'
+# Turning off pseudo_replica_mode clears it.
+SET @@SESSION.original_dpt_write_time = 123456;
+SET @@SESSION.pseudo_replica_mode = 0;
+Warnings:
+Warning	1231	Slave applier execution mode not active, statement ineffective.
+SELECT @@SESSION.original_dpt_write_time;
+@@SESSION.original_dpt_write_time
+0
+# Cannot change inside a transaction.
+SET @@SESSION.pseudo_replica_mode = 1;
+BEGIN;
+SET @@SESSION.original_dpt_write_time = 123456;
+ERROR HY000: The system variable original_dpt_write_time cannot be set when there is an ongoing transaction.
+COMMIT;
+SET @@SESSION.pseudo_replica_mode = 0;
+Warnings:
+Warning	1231	Slave applier execution mode not active, statement ineffective.
+# Requires SESSION_VARIABLES_ADMIN or REPLICATION_APPLIER.
+CREATE USER dpt_user;
+SET @@SESSION.original_dpt_write_time = 123456;
+ERROR 42000: Access denied; you need (at least one of) the SUPER, SYSTEM_VARIABLES_ADMIN, SESSION_VARIABLES_ADMIN or REPLICATION_APPLIER privilege(s) for this operation
+DROP USER dpt_user;

@@ -1,0 +1,4 @@
+SELECT COUNT(*) AS rows_remaining FROM dpt_replay;
+rows_remaining
+0
+Replay preserved the source DPT write time.

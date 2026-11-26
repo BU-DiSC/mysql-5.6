@@ -526,6 +526,8 @@ struct PRINT_EVENT_INFO {
   enum_base64_output_mode base64_output_mode;
   // True if the --skip-gtids flag was specified.
   bool skip_gtids;
+  // Last source DPT timestamp emitted as a replay session setting.
+  uint64_t printed_source_dpt_write_time{0};
 
   /*
     This is set whenever a Format_description_event is printed.

@@ -7464,6 +7464,38 @@ static Sys_var_ulonglong Sys_var_original_commit_timestamp(
     DEFAULT(MAX_COMMIT_TIMESTAMP_VALUE), BLOCK_SIZE(1), NO_MUTEX_GUARD,
     IN_BINLOG, ON_CHECK(check_session_admin_or_replication_applier));
 
+static bool check_original_dpt_write_time(sys_var *self, THD *thd,
+                                          set_var *var) {
+  if (check_session_admin_or_replication_applier(self, thd, var)) return true;
+  // Deletes read the value when they run, but the GTID event carries the
+  // value at commit, so it must not change inside a transaction.
+  if (check_outside_trx(self, thd, var)) return true;
+  if (thd->variables.pseudo_replica_mode) return false;
+  my_error(ER_WRONG_VALUE_FOR_VAR, MYF(0), "original_dpt_write_time",
+           "requires pseudo_replica_mode");
+  return true;
+}
+
+static bool update_original_dpt_write_time(THD *thd, set_var *var) {
+  thd->source_dpt_write_time =
+      var->value != nullptr ? var->save_result.ulonglong_value : 0;
+  return false;
+}
+
+static ulonglong read_original_dpt_write_time(THD *thd) {
+  return thd->source_dpt_write_time;
+}
+
+static Sys_var_session_special Sys_original_dpt_write_time(
+    "original_dpt_write_time",
+    "Original RocksDB delete persistence start time in Unix seconds, "
+    "used while replaying mysqlbinlog SQL output.",
+    sys_var::ONLY_SESSION, NO_CMD_LINE, VALID_RANGE(0, LLONG_MAX),
+    BLOCK_SIZE(1), NO_MUTEX_GUARD, NOT_IN_BINLOG,
+    ON_CHECK(check_original_dpt_write_time),
+    ON_UPDATE(update_original_dpt_write_time),
+    ON_READ(read_original_dpt_write_time));
+
 static Sys_var_ulong Sys_replica_transaction_retries(
     "replica_transaction_retries",
     "Number of times the replication applier will retry a transaction in "
@@ -7722,13 +7754,21 @@ ineffective:
 end:
   return false;
 }
+
+static bool update_pseudo_replica_mode(sys_var *, THD *thd, enum_var_type) {
+  // original_dpt_write_time is only meaningful while replaying binlog SQL.
+  if (!thd->variables.pseudo_replica_mode) thd->source_dpt_write_time = 0;
+  return false;
+}
+
 static Sys_var_bool Sys_pseudo_replica_mode(
     "pseudo_replica_mode",
     "Internal variable that will be enabled while applying a "
     "Format_description_log_event encoded in a BINLOG statement printed "
     "by mysqlbinlog.",
     SESSION_ONLY(pseudo_replica_mode), NO_CMD_LINE, DEFAULT(false),
-    NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(check_pseudo_replica_mode));
+    NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(check_pseudo_replica_mode),
+    ON_UPDATE(update_pseudo_replica_mode));
 
 static Sys_var_deprecated_alias Sys_pseudo_slave_mode("pseudo_slave_mode",
                                                       Sys_pseudo_replica_mode);

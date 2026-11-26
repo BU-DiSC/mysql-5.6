@@ -1,0 +1,73 @@
+--source include/have_log_bin.inc
+--source include/have_rocksdb.inc
+
+--disable_query_log
+SET SESSION binlog_format = ROW;
+CREATE TABLE dpt_replay (id INT PRIMARY KEY) ENGINE=ROCKSDB;
+INSERT INTO dpt_replay VALUES (1);
+SET GLOBAL rocksdb_force_flush_memtable_now = 1;
+
+FLUSH LOGS;
+let $datadir = `SELECT @@datadir`;
+let $binlog = query_get_value(SHOW MASTER STATUS, File, 1);
+DELETE FROM dpt_replay WHERE id = 1 WITH DPT=12345;
+SET GLOBAL rocksdb_force_flush_memtable_now = 1;
+FLUSH LOGS;
+--exec $MYSQL_BINLOG --skip-gtids "$datadir/$binlog" > "$MYSQLTEST_VARDIR/tmp/dpt-replay.sql"
+# GTID mode is off, so the dump keeps anonymous GTID events, which the
+# server applies again.
+--exec $MYSQL_BINLOG "$datadir/$binlog" > "$MYSQLTEST_VARDIR/tmp/dpt-replay-gtid.sql"
+
+INSERT INTO dpt_replay VALUES (1);
+SET GLOBAL rocksdb_force_flush_memtable_now = 1;
+--sleep 2
+--exec $MYSQL < "$MYSQLTEST_VARDIR/tmp/dpt-replay.sql"
+SET GLOBAL rocksdb_force_flush_memtable_now = 1;
+
+INSERT INTO dpt_replay VALUES (1);
+SET GLOBAL rocksdb_force_flush_memtable_now = 1;
+--exec $MYSQL < "$MYSQLTEST_VARDIR/tmp/dpt-replay-gtid.sql"
+SET GLOBAL rocksdb_force_flush_memtable_now = 1;
+
+--enable_query_log
+SELECT COUNT(*) AS rows_remaining FROM dpt_replay;
+--disable_query_log
+
+--perl
+my $root = $ENV{'MYSQLTEST_VARDIR'};
+my %printed;
+for my $file ("dpt-replay.sql", "dpt-replay-gtid.sql") {
+  open my $sql, '<', "$root/tmp/$file" or die "Read $file: $!";
+  while (<$sql>) {
+    $printed{$1} = 1 if /original_dpt_write_time=([1-9]\d*)/;
+  }
+  close $sql;
+}
+die "Expected one printed source DPT write time" unless keys(%printed) == 1;
+my $ldb = "$ENV{'MYSQL_CLIENT_BIN_PATH'}/ldb";
+my $db = "$root/mysqld.1/data/.rocksdb";
+open my $current, '<', "$db/CURRENT" or die "Read CURRENT: $!";
+chomp(my $manifest = <$current>);
+close $current;
+open my $dump, '-|', $ldb, 'manifest_dump', "--path=$db/$manifest",
+     '--verbose', '--json' or die "Run ldb: $!";
+my (%tombstones, %times);
+while (<$dump>) {
+  next unless /"TombstoneDpts"/;
+  while (/\[(\d+),\d+\]:12345@(\d+)/g) {
+    $tombstones{$1} = 1;
+    $times{$2} = 1;
+  }
+}
+close $dump or die "Manifest dump failed";
+# Entries are keyed by tombstone sequence number, so a compaction that
+# rewrites a file does not add new keys.
+die "Expected three DPT tombstones" unless keys(%tombstones) == 3;
+die "Replay changed source DPT write time"
+  unless keys(%times) == 1 && exists $printed{(keys %times)[0]};
+print "Replay preserved the source DPT write time.\n";
+EOF
+
+--remove_file $MYSQLTEST_VARDIR/tmp/dpt-replay.sql
+--remove_file $MYSQLTEST_VARDIR/tmp/dpt-replay-gtid.sql
+DROP TABLE dpt_replay;

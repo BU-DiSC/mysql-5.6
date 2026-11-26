@@ -5603,7 +5603,11 @@ class Rdb_transaction_impl : public Rdb_transaction {
       return false;
     }
 
-    const bool source = m_thd->rli_slave == nullptr;
+    // A binlog applier session keeps the start time set by
+    // original_dpt_write_time, unless it ran its own DELETE ... WITH DPT.
+    const bool source =
+        m_thd->rli_slave == nullptr &&
+        (!m_thd->is_binlog_applier() || has_source_statement_dpt());
     uint64_t source_write_time = 0;
     if (source && has_source_statement_dpt()) {
       auto *batch = m_rocksdb_tx[TABLE_TYPE::USER_TABLE]
@@ -15176,8 +15180,11 @@ int ha_rocksdb::set_delete_dpt(Rdb_transaction *const tx) {
     return HA_ERR_UNSUPPORTED;
   }
   THD *const thd = table->in_use;
+  const bool replaying_delete =
+      thd->rli_slave != nullptr ||
+      (m_in_rpl_delete_rows && thd->is_binlog_applier());
   const bool source_statement_dpt =
-      dml_dpt != 0 && thd->rli_slave == nullptr &&
+      dml_dpt != 0 && !replaying_delete &&
       check_table_binlog_row_based(thd, table);
   if (source_statement_dpt &&
       (log_bin_use_v1_row_events || tx->is_writebatch_trx() ||
@@ -15185,9 +15192,8 @@ int ha_rocksdb::set_delete_dpt(Rdb_transaction *const tx) {
     // These source modes cannot carry the same start time for every delete.
     return HA_ERR_UNSUPPORTED;
   }
-  const uint64_t write_time = dml_dpt != 0 && thd->rli_slave != nullptr
-                                  ? thd->source_dpt_write_time
-                                  : 0;
+  const uint64_t write_time =
+      dml_dpt != 0 && replaying_delete ? thd->source_dpt_write_time : 0;
   const rocksdb::Status s =
       tx->set_delete_dpt(table_type, dpt, write_time, source_statement_dpt);
   if (!s.ok()) {
